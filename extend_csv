@@ -127,6 +127,10 @@ def check_substring_match(target_key, source_keys):
         # Check if each target part is a substring of corresponding source part
         match = True
         for t_part, s_part in zip(target_parts, source_parts):
+            # Skip empty target parts (don't consider them a match)
+            if not t_part.strip():
+                match = False
+                break
             if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
                 match = False
                 break
@@ -215,7 +219,8 @@ for row in target_data:
     target_key = create_match_key(row, target_headers, target_match_cols)
     
     if match_type == 'exact':
-        if target_key in source_lookup:
+        # Skip empty keys (where all parts are empty)
+        if target_key.strip('|') and target_key in source_lookup:
             matches_found += 1
     else:  # substring matching
         if check_substring_match(target_key, source_keys):
@@ -230,7 +235,7 @@ print(f'═══════════════════')
 print(f'Total rows in target file: {total_target_rows:,}')
 print(f'Rows with matches: {matches_found:,} ({match_percentage:.1f}%)')
 print(f'Rows without matches: {no_match_count:,} ({100-match_percentage:.1f}%)')
-print(f'Columns to be added: {len(source_cols)}')
+print(f'Number of columns to be added: {len(source_cols)}')
 print()
 
 # Show some examples of what will happen
@@ -306,6 +311,10 @@ def check_substring_match(target_key, source_keys):
         # Check if each target part is a substring of corresponding source part
         match = True
         for t_part, s_part in zip(target_parts, source_parts):
+            # Skip empty target parts (don't consider them a match)
+            if not t_part.strip():
+                match = False
+                break
             if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
                 match = False
                 break
@@ -392,7 +401,8 @@ for row in target_data:
     # Find matching source row based on match type
     matched_source_key = None
     if match_type == 'exact':
-        if target_key in source_lookup:
+        # Skip empty keys (where all parts are empty)
+        if target_key.strip('|') and target_key in source_lookup:
             matched_source_key = target_key
     else:  # substring matching
         matched_source_key = check_substring_match(target_key, source_keys)
@@ -418,7 +428,14 @@ output_file = f'{target_basename}_extended.csv'
 write_csv_from_dict_list(output_file, extended_data, extended_headers)
 
 print(f'✓ Successfully created: {output_file}')
-print(f'  Final result: {len(extended_data):,} rows with {len(new_column_names)} new columns added')
+if len(new_column_names) == 1:
+    print(f'  Final result: {len(extended_data):,} rows with 1 new column added')
+else:
+    print(f'  Final result: {len(extended_data):,} rows with {len(new_column_names)} new columns added')
+    
+# Print each added column
+for _, col_name in new_column_names:
+    print(f'  → Added column: {col_name}')
 "
 }
 
@@ -580,6 +597,7 @@ with open('$file2', 'r', encoding='utf-8') as f:
     
     # Get columns to add from source file
     echo "Select column(s) to add from source file ($source_file):"
+    echo "You can select multiple columns by separating numbers with commas (e.g., 1,3,4)"
     if [[ "$extend_file" == "file1" ]]; then
         get_columns "$file2"
     else
