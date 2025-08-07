@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# CSV Deduplication Tools - Entry Script
+# Run from anywhere when Path Utilities is in PATH
+
+set -e
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Run the menu from the dedup subdirectory but stay in current directory
+"$SCRIPT_DIR/dedup/menu" "$@"

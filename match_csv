@@ -1,0 +1,355 @@
+#!/bin/bash
+
+# CSV Match Script
+# Compares two CSV files with potentially different headers by matching on specified columns
+# Exports either matching rows or non-matching rows
+
+set -e  # Exit on any error
+
+# Function to get CSV header
+get_header() {
+    head -n 1 "$1"
+}
+
+# Function to get column names from CSV
+get_columns() {
+    python3 -c "
+import csv
+import sys
+
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    for i, header in enumerate(headers):
+        print(f'{i+1:2d}) {header.strip()}')
+"
+}
+
+# Function to find longest common substring for output naming
+longest_common_substring() {
+    python3 -c "
+import sys
+s1, s2 = '$1', '$2'
+
+# Remove file extensions for comparison
+s1 = s1.replace('.csv', '')
+s2 = s2.replace('.csv', '')
+
+max_len = 0
+result = ''
+
+for i in range(len(s1)):
+    for j in range(i + 1, len(s1) + 1):
+        substr = s1[i:j]
+        if substr in s2 and len(substr) > max_len:
+            max_len = len(substr)
+            result = substr
+
+# Clean up the result - remove trailing numbers, underscores, hyphens
+import re
+result = re.sub(r'[_\-\s]*[0-9]+[_\-\s]*$', '', result)
+result = result.strip('_- ')
+
+if result and len(result) >= 3:  # Only use if meaningful length
+    print(result)
+else:
+    # Fallback to first part of first filename
+    first_part = s1.split('_')[0].split('-')[0].split(' ')[0]
+    print(first_part if first_part else 'match')
+"
+}
+
+# Function to match CSV files based on specified columns
+match_csv_files() {
+    local file1="$1"
+    local file2="$2"
+    local col1_idx="$3"
+    local col2_idx="$4"
+    local output_type="$5"  # "matching" or "non_matching"
+    local export_from="$6"  # "file1" or "file2"
+    local base_name="$7"
+    
+    python3 -c "
+import csv
+import sys
+from collections import OrderedDict
+
+def read_csv_with_index_column(filename, match_col_idx):
+    data = []
+    match_values = set()
+    
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            # Pad row if it has fewer columns than headers
+            while len(row) < len(headers):
+                row.append('')
+            
+            # Create row dict
+            row_dict = {}
+            for i, header in enumerate(headers):
+                row_dict[header.strip()] = row[i] if i < len(row) else ''
+            
+            data.append(row_dict)
+            
+            # Add match value to set (using 0-based indexing)
+            if match_col_idx < len(row):
+                match_val = row[match_col_idx].strip()
+                if match_val:  # Only add non-empty values
+                    match_values.add(match_val)
+    
+    return data, headers, match_values
+
+def write_csv_from_dict_list(filename, data, fieldnames):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(data)
+
+# Read both files
+file1_data, file1_headers, file1_match_values = read_csv_with_index_column('$file1', $col1_idx - 1)
+file2_data, file2_headers, file2_match_values = read_csv_with_index_column('$file2', $col2_idx - 1)
+
+output_type = '$output_type'
+export_from = '$export_from'
+base_name = '$base_name'
+col1_idx = $col1_idx - 1  # Convert to 0-based
+col2_idx = $col2_idx - 1  # Convert to 0-based
+
+# Get column names for reference
+col1_name = file1_headers[col1_idx].strip() if col1_idx < len(file1_headers) else f'Column_{col1_idx+1}'
+col2_name = file2_headers[col2_idx].strip() if col2_idx < len(file2_headers) else f'Column_{col2_idx+1}'
+
+print(f'Matching on:')
+print(f'  File 1 column: {col1_name}')
+print(f'  File 2 column: {col2_name}')
+print(f'  Exporting from: {\"File 1\" if export_from == \"file1\" else \"File 2\"}')
+print()
+
+# Determine which file's data and headers to use for export
+if export_from == 'file1':
+    export_data = file1_data
+    export_headers = file1_headers
+    export_match_col_idx = col1_idx
+    reference_match_values = file2_match_values
+    export_file_name = '$file1'
+else:
+    export_data = file2_data
+    export_headers = file2_headers
+    export_match_col_idx = col2_idx
+    reference_match_values = file1_match_values
+    export_file_name = '$file2'
+
+if output_type == 'matching':
+    # Find rows in export file that have matching values in reference file
+    matching_rows = []
+    
+    for row in export_data:
+        # Get the match value from export file
+        match_val = ''
+        col_values = list(row.values())
+        if export_match_col_idx < len(col_values):
+            match_val = col_values[export_match_col_idx].strip()
+        
+        # Check if this value exists in reference file
+        if match_val and match_val in reference_match_values:
+            matching_rows.append(row)
+    
+    if matching_rows:
+        # Create filename with source file basename
+        source_basename = export_file_name.replace('.csv', '').replace('./', '')
+        output_file = f'{source_basename}_matching_rows.csv'
+        write_csv_from_dict_list(output_file, matching_rows, export_headers)
+        print(f'✓ Created {output_file} with {len(matching_rows)} matching rows from {export_file_name}')
+    else:
+        print(f'No matching rows found in {export_file_name}.')
+        sys.exit(0)
+
+else:  # non_matching
+    # Find rows in export file that do NOT have matching values in reference file
+    non_matching_rows = []
+    
+    for row in export_data:
+        # Get the match value from export file
+        match_val = ''
+        col_values = list(row.values())
+        if export_match_col_idx < len(col_values):
+            match_val = col_values[export_match_col_idx].strip()
+        
+        # Check if this value does NOT exist in reference file
+        if not match_val or match_val not in reference_match_values:
+            non_matching_rows.append(row)
+    
+    if non_matching_rows:
+        # Create filename with source file basename
+        source_basename = export_file_name.replace('.csv', '').replace('./', '')
+        output_file = f'{source_basename}_non_matching_rows.csv'
+        write_csv_from_dict_list(output_file, non_matching_rows, export_headers)
+        print(f'✓ Created {output_file} with {len(non_matching_rows)} non-matching rows from {export_file_name}')
+    else:
+        print(f'All rows in {export_file_name} have matches in the other file.')
+        sys.exit(0)
+"
+}
+
+# Main script
+main() {
+    echo "🔍 Scanning for CSV files in current directory..."
+    
+    # Find all CSV files (compatible with zsh)
+    csv_files=()
+    while IFS= read -r -d '' file; do
+        csv_files+=("$file")
+    done < <(find . -maxdepth 1 -name "*.csv" -type f -print0 | sort -z)
+    
+    local num_files=${#csv_files[@]}
+    
+    if [[ $num_files -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    elif [[ $num_files -eq 1 ]]; then
+        echo "❌ Only 1 CSV file found. Need exactly 2 files for comparison."
+        echo "   Found: ${csv_files[0]}"
+        exit 1
+    elif [[ $num_files -gt 2 ]]; then
+        echo "❌ Found $num_files CSV files. Need exactly 2 files for comparison."
+        echo "   Found files:"
+        printf '     %s\n' "${csv_files[@]}"
+        exit 1
+    fi
+    
+    local file1="${csv_files[0]}"
+    local file2="${csv_files[1]}"
+    
+    echo "📁 Found exactly 2 CSV files:"
+    echo "   File 1: $file1"
+    echo "   File 2: $file2"
+    echo
+    
+    # Check if files are readable
+    if [[ ! -r "$file1" ]]; then
+        echo "❌ Cannot read $file1"
+        exit 1
+    fi
+    
+    if [[ ! -r "$file2" ]]; then
+        echo "❌ Cannot read $file2"
+        exit 1
+    fi
+    
+    # Show headers
+    echo "📋 File headers:"
+    echo
+    echo "File 1: $file1"
+    get_columns "$file1"
+    echo
+    echo "File 2: $file2"
+    get_columns "$file2"
+    echo
+    
+    # Get column selection for file 1
+    local num_cols1=$(python3 -c "
+import csv
+with open('$file1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    print(len(headers))
+")
+    
+    while true; do
+        read -p "Select column number from File 1 to match on (1-$num_cols1): " -r col1_choice
+        if [[ "$col1_choice" =~ ^[0-9]+$ ]] && [[ "$col1_choice" -ge 1 ]] && [[ "$col1_choice" -le "$num_cols1" ]]; then
+            break
+        else
+            echo "❌ Invalid choice. Please enter a number between 1 and $num_cols1."
+        fi
+    done
+    
+    # Get column selection for file 2
+    local num_cols2=$(python3 -c "
+import csv
+with open('$file2', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    print(len(headers))
+")
+    
+    while true; do
+        read -p "Select column number from File 2 to match on (1-$num_cols2): " -r col2_choice
+        if [[ "$col2_choice" =~ ^[0-9]+$ ]] && [[ "$col2_choice" -ge 1 ]] && [[ "$col2_choice" -le "$num_cols2" ]]; then
+            break
+        else
+            echo "❌ Invalid choice. Please enter a number between 1 and $num_cols2."
+        fi
+    done
+    
+    echo
+    
+    # Prompt for which file to export from
+    echo "Choose which file to export rows from:"
+    echo "  1) Export from File 1: $file1"
+    echo "  2) Export from File 2: $file2"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-2): " -r choice
+        case $choice in
+            1)
+                export_from="file1"
+                break
+                ;;
+            2)
+                export_from="file2"
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+    
+    echo
+    
+    # Prompt for output type
+    echo "Choose output type:"
+    echo "  1) Export matching rows (rows that have matches in the other file)"
+    echo "  2) Export non-matching rows (rows that do NOT have matches in the other file)"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-2): " -r choice
+        case $choice in
+            1)
+                output_type="matching"
+                break
+                ;;
+            2)
+                output_type="non_matching"
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+    
+    echo
+    
+    # Generate base name for output file
+    local base_name=$(longest_common_substring "$file1" "$file2")
+    
+    echo "📝 Processing files..."
+    echo "   Export from: $([ "$export_from" = "file1" ] && echo "$file1" || echo "$file2")"
+    echo "   Output type: $output_type"
+    echo
+    
+    # Perform the matching
+    match_csv_files "$file1" "$file2" "$col1_choice" "$col2_choice" "$output_type" "$export_from" "$base_name"
+    
+    echo "🎉 Matching completed successfully!"
+}
+
+# Run main function
+main "$@"

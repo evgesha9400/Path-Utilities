@@ -1,0 +1,489 @@
+#!/bin/bash
+
+# CSV Column Deletion Script
+# Analyzes fill percentage of columns in CSV files and allows selective column deletion
+
+set -e  # Exit on any error
+
+# Function to get CSV header
+get_header() {
+    head -n 1 "$1"
+}
+
+# Function to get column names from CSV
+get_columns() {
+    python3 -c "
+import csv
+import sys
+
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    for i, header in enumerate(headers):
+        print(f'{i+1:2d}) {header.strip()}')
+"
+}
+
+# Function to analyze fill percentage for CSV columns
+analyze_fill_percentage() {
+    local filename="$1"
+    
+    python3 -c "
+import csv
+import sys
+
+def is_empty_value(value):
+    if not value:
+        return True
+    return str(value).strip() == ''
+
+filename = '$filename'
+
+try:
+    with open(filename, 'r', encoding='utf-8') as f:
+        # Detect delimiter
+        sample = f.read(1024)
+        f.seek(0)
+        sniffer = csv.Sniffer()
+        delimiter = sniffer.sniff(sample).delimiter
+        
+        reader = csv.reader(f, delimiter=delimiter)
+        headers = next(reader)
+        
+        # Initialize counters
+        total_rows = 0
+        non_empty_counts = {header.strip(): 0 for header in headers}
+        
+        # Count non-empty values for each column
+        for row in reader:
+            total_rows += 1
+            
+            # Pad row if it has fewer columns than headers
+            while len(row) < len(headers):
+                row.append('')
+            
+            for i, header in enumerate(headers):
+                header = header.strip()
+                value = row[i] if i < len(row) else ''
+                if not is_empty_value(value):
+                    non_empty_counts[header] += 1
+        
+        # Calculate and display fill percentages
+        print(f'📊 Fill Analysis for: {filename}')
+        print(f'Total rows: {total_rows:,}')
+        print('=' * 80)
+        print(f\"{'#':<3} {'Column Name':<40} {'Fill %':<8} {'Non-empty':<12}\")
+        print('-' * 80)
+        
+        # Sort columns by fill percentage (ascending)
+        fill_data = []
+        for header in headers:
+            header = header.strip()
+            if total_rows > 0:
+                fill_percent = (non_empty_counts[header] / total_rows) * 100
+                fill_data.append((header, fill_percent, non_empty_counts[header]))
+            else:
+                fill_data.append((header, 0.0, 0))
+        
+        fill_data.sort(key=lambda x: x[1])  # Sort by fill percentage
+        
+        for i, (column, fill_percent, non_empty_count) in enumerate(fill_data, 1):
+            # Truncate long column names for display
+            display_name = column[:38] + '..' if len(column) > 40 else column
+            print(f'{i:<3} {display_name:<40} {fill_percent:>6.2f}% {non_empty_count:>10,}')
+        
+        # Output sorted column list for bash processing
+        print('||COLUMNS||')
+        for i, (column, fill_percent, _) in enumerate(fill_data, 1):
+            print(f'{i}|{column}|{fill_percent:.2f}')
+        
+        print(f'||TOTAL_ROWS||{total_rows}')
+        print(f'||DELIMITER||{repr(delimiter)}')
+        
+except Exception as e:
+    print(f'❌ Error reading {filename}: {e}')
+    sys.exit(1)
+"
+}
+
+# Function to parse column selection
+parse_column_selection() {
+    local input="$1"
+    local max_cols="$2"
+    
+    python3 -c "
+import sys
+import re
+
+input_str = '$input'.strip().lower()
+max_cols = $max_cols
+
+if input_str == 'none':
+    print('NONE')
+    sys.exit(0)
+elif input_str == 'all':
+    print(','.join(map(str, range(1, max_cols + 1))))
+    sys.exit(0)
+
+try:
+    # Parse comma-separated numbers and ranges
+    parts = [part.strip() for part in input_str.split(',')]
+    selected = set()  # Use set to avoid duplicates
+    
+    for part in parts:
+        if '-' in part:
+            # Handle range (e.g., '5-10')
+            range_parts = part.split('-')
+            if len(range_parts) != 2:
+                print(f'ERROR: Invalid range format \"{part}\". Use format like \"5-10\"')
+                sys.exit(1)
+            
+            try:
+                start = int(range_parts[0].strip())
+                end = int(range_parts[1].strip())
+                
+                if start > end:
+                    print(f'ERROR: Invalid range \"{part}\". Start must be <= end')
+                    sys.exit(1)
+                
+                if start < 1 or end > max_cols:
+                    print(f'ERROR: Range \"{part}\" is out of bounds (1-{max_cols})')
+                    sys.exit(1)
+                
+                # Add all numbers in the range
+                for num in range(start, end + 1):
+                    selected.add(num)
+                    
+            except ValueError:
+                print(f'ERROR: Invalid range \"{part}\". Both parts must be numbers')
+                sys.exit(1)
+        else:
+            # Handle single number
+            try:
+                col_num = int(part)
+                if 1 <= col_num <= max_cols:
+                    selected.add(col_num)
+                else:
+                    print(f'ERROR: Column {col_num} is out of range (1-{max_cols})')
+                    sys.exit(1)
+            except ValueError:
+                print(f'ERROR: \"{part}\" is not a valid number')
+                sys.exit(1)
+    
+    if selected:
+        # Sort the selected columns and return as comma-separated string
+        sorted_selected = sorted(list(selected))
+        print(','.join(map(str, sorted_selected)))
+    else:
+        print('NONE')
+        
+except Exception as e:
+    print(f'ERROR: Invalid input. Please enter numbers separated by commas, ranges (e.g., 5-10), \"none\", or \"all\"')
+    sys.exit(1)
+"
+}
+
+# Function to delete columns from CSV
+delete_columns_from_csv() {
+    local filename="$1"
+    local columns_to_delete="$2"
+    local delimiter="$3"
+    
+    python3 -c "
+import csv
+import sys
+import os
+
+filename = '$filename'
+columns_to_delete = '$columns_to_delete'.split('|') if '$columns_to_delete' else []
+delimiter = $delimiter
+
+if not columns_to_delete:
+    print('No columns selected for deletion.')
+    sys.exit(0)
+
+# Generate output filename
+base_name = filename.replace('.csv', '')
+output_filename = f'{base_name}_Delete_Columns.csv'
+
+try:
+    # Read original file to get headers and data
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        headers = [h.strip() for h in next(reader)]
+        
+        # Determine columns to keep
+        columns_to_keep = [col for col in headers if col not in columns_to_delete]
+        
+        if not columns_to_keep:
+            print('❌ Cannot delete all columns. At least one column must remain.')
+            sys.exit(1)
+        
+        # Read all data
+        f.seek(0)
+        reader = csv.DictReader(f, delimiter=delimiter)
+        rows = list(reader)
+    
+    # Write filtered CSV
+    with open(output_filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=columns_to_keep, delimiter=delimiter)
+        writer.writeheader()
+        
+        for row in rows:
+            filtered_row = {col: row.get(col, '') for col in columns_to_keep}
+            writer.writerow(filtered_row)
+    
+    print(f'✓ Successfully created: {output_filename}')
+    print(f'  Deleted {len(columns_to_delete)} column(s): {', '.join(columns_to_delete)}')
+    print(f'  Remaining {len(columns_to_keep)} column(s)')
+    print(f'  Total rows: {len(rows):,}')
+    
+except Exception as e:
+    print(f'❌ Error creating output file: {e}')
+    sys.exit(1)
+"
+}
+
+# Main script
+main() {
+    echo "🔍 CSV Column Analysis & Deletion Tool"
+    echo "======================================"
+    
+    # Find all CSV files in current directory
+    csv_files=()
+    shopt -s nullglob  # Handle case where no CSV files exist
+    for file in *.csv; do
+        if [[ -f "$file" ]]; then
+            csv_files+=("$file")
+        fi
+    done
+    shopt -u nullglob
+    
+    # Sort the files for consistent ordering
+    if [[ ${#csv_files[@]} -gt 0 ]]; then
+        IFS=$'\n' csv_files=($(sort <<<"${csv_files[*]}"))
+        unset IFS
+    fi
+    
+    local num_files=${#csv_files[@]}
+    
+    if [[ $num_files -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    fi
+    
+    # Select file to analyze
+    local selected_file=""
+    if [[ $num_files -eq 1 ]]; then
+        selected_file="${csv_files[0]}"
+        echo "📄 Found 1 CSV file: $selected_file"
+    else
+        echo "📂 Found $num_files CSV files. Select file to analyze:"
+        for i in "${!csv_files[@]}"; do
+            echo "   $((i+1))) ${csv_files[i]}"
+        done
+        echo
+        
+        while true; do
+            read -p "Enter choice (1-$num_files): " -r choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && [[ $choice -ge 1 ]] && [[ $choice -le $num_files ]]; then
+                selected_file="${csv_files[$((choice-1))]}"
+                break
+            else
+                echo "❌ Invalid choice. Please enter 1-$num_files"
+            fi
+        done
+    fi
+    
+    echo
+    
+    # Check if file is readable
+    if [[ ! -r "$selected_file" ]]; then
+        echo "❌ Cannot read $selected_file"
+        exit 1
+    fi
+    
+    # Analyze fill percentage
+    echo "📊 Analyzing column fill percentages..."
+    echo
+    
+    local analysis_output=$(analyze_fill_percentage "$selected_file")
+    
+    # Parse analysis output
+    local columns_section=false
+    local columns_data=()
+    local total_rows=""
+    local delimiter=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" == "||COLUMNS||" ]]; then
+            columns_section=true
+            continue
+        elif [[ "$line" =~ ^\|\|TOTAL_ROWS\|\|(.*)$ ]]; then
+            total_rows="${BASH_REMATCH[1]}"
+            continue
+        elif [[ "$line" =~ ^\|\|DELIMITER\|\|(.*)$ ]]; then
+            delimiter="${BASH_REMATCH[1]}"
+            continue
+        elif [[ "$columns_section" == true ]] && [[ "$line" =~ ^[0-9]+\| ]]; then
+            columns_data+=("$line")
+        elif [[ "$line" != "||"* ]]; then
+            echo "$line"
+        fi
+    done <<< "$analysis_output"
+    
+    if [[ ${#columns_data[@]} -eq 0 ]]; then
+        echo "❌ Failed to analyze the CSV file."
+        exit 1
+    fi
+    
+    if [[ "$total_rows" == "0" ]]; then
+        echo "❌ CSV file has no data rows."
+        exit 1
+    fi
+    
+    echo
+    
+    # Ask if user wants to delete columns
+    echo "❓ Do you want to delete any columns?"
+    while true; do
+        read -p "Continue with column deletion? (y/n): " -r proceed
+        case $proceed in
+            [Yy]*)
+                break
+                ;;
+            [Nn]*)
+                echo "✅ Analysis complete. No columns were deleted."
+                exit 0
+                ;;
+            *)
+                echo "Please enter 'y' or 'n'"
+                ;;
+        esac
+    done
+    
+    echo
+    echo "🗑️  Column Deletion Selection"
+    echo "============================="
+    echo "Select columns to delete (you can choose multiple):"
+    echo
+    
+    # Display numbered column list
+    for line in "${columns_data[@]}"; do
+        IFS='|' read -r num column fill_percent <<< "$line"
+        printf "%2d) %s (%.2f%% fill)\n" "$num" "$column" "$fill_percent"
+    done
+    
+    echo
+    echo "Commands:"
+    echo "  Enter numbers separated by commas (e.g., 1,3,5)"
+    echo "  Enter ranges using dashes (e.g., 1-10, 15-20)"
+    echo "  Mix both formats (e.g., 1,3,5-10,15,20-25)"
+    echo "  Enter 'none' to skip deletion"
+    echo "  Enter 'all' to delete all columns"
+    echo
+    
+    # Get user selection
+    local selected_columns=""
+    while true; do
+        read -p "Enter your selection: " -r user_input
+        selected_columns=$(parse_column_selection "$user_input" "${#columns_data[@]}")
+        
+        if [[ "$selected_columns" =~ ^ERROR: ]]; then
+            echo "$selected_columns"
+            continue
+        else
+            break
+        fi
+    done
+    
+    if [[ "$selected_columns" == "NONE" ]]; then
+        echo "✅ No columns selected for deletion."
+        exit 0
+    fi
+    
+    # Convert column numbers to column names
+    local columns_to_delete=()
+    IFS=',' read -ra selected_nums <<< "$selected_columns"
+    
+    for num in "${selected_nums[@]}"; do
+        for line in "${columns_data[@]}"; do
+            IFS='|' read -r line_num column fill_percent <<< "$line"
+            if [[ "$line_num" == "$num" ]]; then
+                columns_to_delete+=("$column")
+                break
+            fi
+        done
+    done
+    
+    # Confirm deletion
+    echo
+    echo "⚠️  You are about to delete ${#columns_to_delete[@]} column(s):"
+    for col in "${columns_to_delete[@]}"; do
+        # Find fill percentage for this column
+        for line in "${columns_data[@]}"; do
+            IFS='|' read -r line_num column fill_percent <<< "$line"
+            if [[ "$column" == "$col" ]]; then
+                echo "   • $col ($fill_percent% fill)"
+                break
+            fi
+        done
+    done
+    
+    echo
+    while true; do
+        read -p "Proceed with deletion? (y/n): " -r confirm
+        case $confirm in
+            [Yy]*)
+                break
+                ;;
+            [Nn]*)
+                echo "❌ Column deletion cancelled."
+                exit 0
+                ;;
+            *)
+                echo "Please enter 'y' or 'n'"
+                ;;
+        esac
+    done
+    
+    # Check if output file exists
+    local base_name="${selected_file%.*}"
+    local output_file="${base_name}_Delete_Columns.csv"
+    
+    if [[ -e "$output_file" ]]; then
+        echo
+        while true; do
+            read -p "⚠️  Output file '$output_file' already exists. Overwrite? (y/n): " -r overwrite
+            case $overwrite in
+                [Yy]*)
+                    break
+                    ;;
+                [Nn]*)
+                    echo "❌ Operation cancelled."
+                    exit 0
+                    ;;
+                *)
+                    echo "Please enter 'y' or 'n'"
+                    ;;
+            esac
+        done
+    fi
+    
+    echo
+    echo "📝 Creating modified CSV file..."
+    
+    # Join column names with pipe separator for Python script
+    local columns_str=$(IFS='|'; echo "${columns_to_delete[*]}")
+    
+    # Perform deletion
+    delete_columns_from_csv "$selected_file" "$columns_str" "$delimiter"
+    
+    echo
+    echo "🎉 Column deletion completed successfully!"
+    echo "   Original file: $selected_file"
+    echo "   New file: $output_file"
+}
+
+# Run main function
+main "$@"

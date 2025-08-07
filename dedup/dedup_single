@@ -1,0 +1,520 @@
+#!/bin/bash
+
+# CSV Single-Column Deduplication Script
+# Removes duplicate rows based on one selected column
+
+set -e  # Exit on any error
+
+echo "🔍 SINGLE-COLUMN DEDUPLICATION"
+echo "════════════════════════════════════════════════════════════════"
+echo "This script removes rows that have duplicate values in ONE selected column."
+echo "• Choose which column to use as the duplicate key (e.g., email, ID, SKU)"
+echo "• Rows with the same value in that column are considered duplicates"
+echo "• Automatic modes: keep first, last, or best (most filled) duplicate"
+echo "• Manual mode: review each duplicate set and choose which row to keep"
+echo "════════════════════════════════════════════════════════════════"
+echo
+
+# Function to get column names from CSV
+get_columns() {
+    python3 -c "
+import csv
+import sys
+
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    for i, header in enumerate(headers):
+        print(f'{i+1:2d}) {header.strip()}')
+"
+}
+
+# Function to get total row count
+get_row_count() {
+    python3 -c "
+import csv
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    next(reader)  # Skip header
+    count = sum(1 for row in reader)
+    print(count)
+"
+}
+
+# Function to analyze single-column duplicates
+analyze_single_duplicates() {
+    local input_file="$1"
+    local column_index="$2"  # 0-based column index
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def count_filled_columns(row):
+    return sum(1 for cell in row if cell.strip())
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num + 2))  # +2 for 1-based line numbers after header
+    
+    return data, headers
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+original_count = len(data)
+column_index = int('$column_index')
+column_name = headers[column_index].strip()
+
+print(f'📊 File Analysis:')
+print(f'   Total rows: {original_count:,}')
+print(f'   Deduplication column: \"{column_name}\" (column {column_index + 1})')
+print()
+
+# Group rows by column value
+duplicate_groups = defaultdict(list)
+
+for row_data, line_num in data:
+    # Get the key value from the selected column
+    if column_index < len(row_data):
+        key_value = row_data[column_index].strip().lower()
+    else:
+        key_value = ''
+    
+    duplicate_groups[key_value].append((row_data, line_num))
+
+# Find duplicates
+duplicate_keys = [key for key, rows in duplicate_groups.items() if len(rows) > 1]
+total_duplicates = sum(len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1)
+
+if len(duplicate_keys) == 0:
+    print('✅ No duplicates found!')
+    print(f'   All {original_count:,} rows have unique values in \"{column_name}\".')
+    print('RETURN_CODE:0')
+else:
+    print(f'📊 Duplicate Summary:')
+    print(f'   Unique groups with duplicates: {len(duplicate_keys):,}')
+    print(f'   Total duplicate rows to remove: {total_duplicates:,}')
+    print(f'   Final row count after deduplication: {original_count - total_duplicates:,}')
+    print(f'   Reduction: {(total_duplicates/original_count*100):.1f}%')
+    print()
+    
+    # Show examples of duplicates (limit to first 5 groups)
+    print('🔍 Duplicate Examples:')
+    
+    shown_groups = 0
+    max_groups_to_show = 5
+    
+    for key_value, rows in duplicate_groups.items():
+        if len(rows) <= 1 or shown_groups >= max_groups_to_show:
+            continue
+            
+        shown_groups += 1
+        display_key = key_value if len(key_value) <= 50 else key_value[:47] + '...'
+        print(f'\\n   Group {shown_groups}: {len(rows)} rows with \"{column_name}\" = \"{display_key}\"')
+        print(f'     Found on lines: {\", \".join(str(row[1]) for row in rows)}')
+        
+        # Show filled column counts for each row
+        for row_data, line_num in rows:
+            filled_count = count_filled_columns(row_data)
+            print(f'     Line {line_num}: {filled_count} filled columns')
+    
+    if len(duplicate_keys) > max_groups_to_show:
+        remaining = len(duplicate_keys) - max_groups_to_show
+        print(f'\\n   ... and {remaining} more duplicate group(s)')
+    
+    print(f'\\nRETURN_CODE:{total_duplicates}')
+"
+}
+
+# Function to manually select from duplicates
+manual_deduplication() {
+    local input_file="$1"
+    local column_index="$2"
+    local output_file="$3"
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def count_filled_columns(row):
+    return sum(1 for cell in row if cell.strip())
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num + 2))
+    
+    return data, headers
+
+def write_csv_data(filename, rows, headers):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
+def display_row(row, headers, line_num, column_index):
+    print(f'     Line {line_num} ({count_filled_columns(row)} filled columns):')
+    for i, (header, value) in enumerate(zip(headers, row)):
+        if value.strip() or i == column_index:  # Show non-empty values or the key column
+            display_value = value[:50] + '...' if len(value) > 50 else value
+            marker = ' ★' if i == column_index else ''
+            print(f'       {header}: {display_value}{marker}')
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+column_index = int('$column_index')
+column_name = headers[column_index].strip()
+
+# Group rows by column value
+duplicate_groups = defaultdict(list)
+for row_data, line_num in data:
+    if column_index < len(row_data):
+        key_value = row_data[column_index].strip().lower()
+    else:
+        key_value = ''
+    duplicate_groups[key_value].append((row_data, line_num))
+
+# Process duplicates with manual selection
+selected_rows = []
+group_num = 0
+
+for key_value, rows in duplicate_groups.items():
+    if len(rows) == 1:
+        # No duplicates, keep the only row
+        selected_rows.append(rows[0])
+    else:
+        # Duplicates found - manual selection
+        group_num += 1
+        display_key = key_value if len(key_value) <= 50 else key_value[:47] + '...'
+        print(f'\\n🔍 Duplicate Group {group_num} ({len(rows)} rows with \"{column_name}\" = \"{display_key}\"):')
+        print('=' * 80)
+        print('(★ indicates the deduplication column)')
+        
+        for i, (row_data, line_num) in enumerate(rows):
+            print(f'\\n  {i+1}) ')
+            display_row(row_data, headers, line_num, column_index)
+        
+        print(f'\\n  {len(rows)+1}) Auto-select best (most filled columns)')
+        print(f'  {len(rows)+2}) Skip this group (keep first occurrence - line {rows[0][1]})')
+        
+        while True:
+            try:
+                choice = input(f'\\nSelect which row to keep (1-{len(rows)+2}): ').strip()
+                choice_num = int(choice)
+                
+                if 1 <= choice_num <= len(rows):
+                    selected_rows.append(rows[choice_num - 1])
+                    print(f'✓ Keeping row from line {rows[choice_num - 1][1]}')
+                    break
+                elif choice_num == len(rows) + 1:
+                    # Auto-select best (most filled)
+                    best_row = max(rows, key=lambda x: count_filled_columns(x[0]))
+                    selected_rows.append(best_row)
+                    print(f'✓ Auto-selected most filled row (line {best_row[1]}, {count_filled_columns(best_row[0])} columns)')
+                    break
+                elif choice_num == len(rows) + 2:
+                    selected_rows.append(rows[0])  # Keep first
+                    print(f'✓ Keeping first occurrence (line {rows[0][1]})')
+                    break
+                else:
+                    print(f'❌ Invalid choice. Please enter a number between 1 and {len(rows)+2}.')
+            except (ValueError, KeyboardInterrupt):
+                print(f'❌ Invalid input. Please enter a number between 1 and {len(rows)+2}.')
+
+# Sort by original line number to maintain order
+selected_rows.sort(key=lambda x: x[1])
+final_rows = [row for row, line_num in selected_rows]
+
+# Write result
+write_csv_data('$output_file', final_rows, headers)
+
+removed_count = len(data) - len(final_rows)
+print(f'\\n✅ Manual deduplication completed!')
+print(f'   Created: $output_file')
+print(f'   Rows removed: {removed_count:,}')
+print(f'   Final count: {len(final_rows):,}')
+"
+}
+
+# Function to auto-deduplicate with strategy
+auto_deduplication() {
+    local input_file="$1"
+    local column_index="$2"
+    local strategy="$3"  # "first", "last", or "best"
+    local output_file="$4"
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def count_filled_columns(row):
+    return sum(1 for cell in row if cell.strip())
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num))
+    
+    return data, headers
+
+def write_csv_data(filename, rows, headers):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
+def select_row_by_strategy(rows, strategy):
+    if strategy == 'first':
+        return min(rows, key=lambda x: x[1])  # Earliest row number
+    elif strategy == 'last':
+        return max(rows, key=lambda x: x[1])  # Latest row number
+    else:  # best
+        # Find rows with maximum filled columns
+        max_filled = max(count_filled_columns(row[0]) for row in rows)
+        best_rows = [row for row in rows if count_filled_columns(row[0]) == max_filled]
+        # If tie, keep first
+        return min(best_rows, key=lambda x: x[1])
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+column_index = int('$column_index')
+strategy = '$strategy'
+
+# Group rows by column value
+duplicate_groups = defaultdict(list)
+for row_data, row_num in data:
+    if column_index < len(row_data):
+        key_value = row_data[column_index].strip().lower()
+    else:
+        key_value = ''
+    duplicate_groups[key_value].append((row_data, row_num))
+
+# Process each group and select based on strategy
+selected_rows = []
+removed_count = 0
+
+for key_value, rows in duplicate_groups.items():
+    if len(rows) == 1:
+        # No duplicates, keep the only row
+        selected_rows.append(rows[0])
+    else:
+        # Duplicates found, select based on strategy
+        chosen_row = select_row_by_strategy(rows, strategy)
+        selected_rows.append(chosen_row)
+        removed_count += len(rows) - 1
+
+# Sort by original row number to maintain order
+selected_rows.sort(key=lambda x: x[1])
+final_rows = [row for row, row_num in selected_rows]
+
+# Write result
+write_csv_data('$output_file', final_rows, headers)
+
+print(f'✅ Automatic deduplication completed!')
+print(f'   Strategy: {strategy}')
+print(f'   Created: $output_file')
+print(f'   Rows removed: {removed_count:,}')
+print(f'   Final count: {len(final_rows):,}')
+"
+}
+
+# Main script
+main() {
+    # Find CSV files
+    echo "🔍 Scanning for CSV files in current directory..."
+    
+    csv_files=()
+    while IFS= read -r -d '' file; do
+        csv_files+=("$file")
+    done < <(find . -maxdepth 1 -name "*.csv" -type f -print0 | sort -z)
+    
+    local num_files=${#csv_files[@]}
+    
+    if [[ $num_files -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    elif [[ $num_files -eq 1 ]]; then
+        local input_file="${csv_files[0]}"
+        echo "📁 Found 1 CSV file: $input_file"
+    else
+        echo "📁 Found $num_files CSV files:"
+        printf '     %s\n' "${csv_files[@]}"
+        echo
+        echo "Please select which file to deduplicate:"
+        
+        for i in "${!csv_files[@]}"; do
+            echo "  $((i+1))) ${csv_files[$i]}"
+        done
+        
+        while true; do
+            read -p "Enter your choice (1-$num_files): " -r file_choice
+            if [[ "$file_choice" =~ ^[0-9]+$ ]] && [[ "$file_choice" -ge 1 ]] && [[ "$file_choice" -le "$num_files" ]]; then
+                local input_file="${csv_files[$((file_choice-1))]}"
+                break
+            else
+                echo "❌ Invalid choice. Please enter a number between 1 and $num_files."
+            fi
+        done
+    fi
+    
+    echo
+    echo "Selected file: $input_file"
+    
+    # Check if file is readable
+    if [[ ! -r "$input_file" ]]; then
+        echo "❌ Cannot read $input_file"
+        exit 1
+    fi
+    
+    # Get total row count
+    local total_rows=$(get_row_count "$input_file")
+    echo "Total data rows: $total_rows"
+    echo
+    
+    # Show columns
+    echo "📋 Available columns:"
+    get_columns "$input_file"
+    echo
+    
+    # Get column selection
+    local num_cols=$(python3 -c "
+import csv
+with open('$input_file', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    print(len(headers))
+")
+    
+    echo "Select the column to use for deduplication:"
+    echo "Rows with the same value in this column will be considered duplicates."
+    echo
+    
+    while true; do
+        read -p "Column number (1-$num_cols): " -r column_choice
+        
+        if [[ "$column_choice" =~ ^[0-9]+$ ]] && [[ "$column_choice" -ge 1 ]] && [[ "$column_choice" -le "$num_cols" ]]; then
+            local column_index=$((column_choice - 1))  # Convert to 0-based
+            break
+        else
+            echo "❌ Invalid choice. Please enter a number between 1 and $num_cols."
+        fi
+    done
+    
+    echo
+    
+    # Analyze duplicates
+    local analysis_output=$(analyze_single_duplicates "$input_file" "$column_index")
+    local duplicate_count=$(echo "$analysis_output" | grep "RETURN_CODE:" | cut -d: -f2)
+    
+    # Display analysis results
+    echo "$analysis_output" | grep -v "RETURN_CODE:"
+    echo
+    
+    # If no duplicates found, exit
+    if [[ "$duplicate_count" -eq 0 ]]; then
+        echo "🎉 No deduplication needed - your file has no duplicates in the selected column!"
+        exit 0
+    fi
+    
+    # Show deduplication summary and ask for confirmation
+    echo "⚠️  Found $duplicate_count duplicate rows to remove."
+    echo
+    echo "📊 DEDUPLICATION SUMMARY:"
+    echo "   • Original file: $input_file"
+    echo "   • Duplicate rows to remove: $duplicate_count"
+    echo "   • Final row count: $((total_rows - duplicate_count))"
+    echo "   • Your original file will remain unchanged"
+    echo "   • A new deduplicated file will be created"
+    echo
+    read -p "Do you want to proceed with deduplication? (y/N): " -r proceed_choice
+    echo
+    
+    if [[ ! "$proceed_choice" =~ ^[Yy]$ ]]; then
+        echo "❌ Deduplication cancelled by user."
+        exit 0
+    fi
+    
+    echo "Choose deduplication method:"
+    echo "  1) Manual - review each duplicate set and choose which row to keep"
+    echo "  2) Automatic (first) - keep first occurrence of each duplicate"
+    echo "  3) Automatic (last) - keep last occurrence of each duplicate"
+    echo "  4) Automatic (best) - keep row with most filled columns"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-4): " -r method_choice
+        case $method_choice in
+            1)
+                local use_manual=true
+                break
+                ;;
+            2)
+                local use_manual=false
+                local strategy="first"
+                break
+                ;;
+            3)
+                local use_manual=false
+                local strategy="last"
+                break
+                ;;
+            4)
+                local use_manual=false
+                local strategy="best"
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1, 2, 3, or 4."
+                ;;
+        esac
+    done
+    
+    # Generate output filename
+    local base_name=$(basename "$input_file" .csv)
+    if [[ "$use_manual" == true ]]; then
+        local output_file="${base_name}_single_manual_deduplicated.csv"
+    else
+        local output_file="${base_name}_single_${strategy}_deduplicated.csv"
+    fi
+    
+    echo
+    echo "📝 Processing file..."
+    echo "   Input file: $input_file"
+    echo "   Output file: $output_file"
+    echo
+    
+    # Perform deduplication
+    if [[ "$use_manual" == true ]]; then
+        manual_deduplication "$input_file" "$column_index" "$output_file"
+    else
+        auto_deduplication "$input_file" "$column_index" "$strategy" "$output_file"
+    fi
+    
+    echo
+    echo "🎉 Single-column deduplication completed successfully!"
+}
+
+# Run main function
+main "$@"

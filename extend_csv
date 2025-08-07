@@ -1,0 +1,671 @@
+#!/bin/bash
+
+# CSV Extend Script
+# Extends one CSV file with selected columns from another CSV file by matching on specified columns
+# Allows matching on multiple columns and selecting which columns to add
+
+set -e  # Exit on any error
+
+# Function to get CSV header
+get_header() {
+    head -n 1 "$1"
+}
+
+# Function to get column names from CSV
+get_columns() {
+    python3 -c "
+import csv
+import sys
+
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    for i, header in enumerate(headers):
+        print(f'{i+1:2d}) {header.strip()}')
+"
+}
+
+# Function to parse comma-separated column numbers
+parse_column_numbers() {
+    local input="$1"
+    local max_cols="$2"
+    
+    python3 -c "
+import sys
+import re
+
+input_str = '$input'
+max_cols = $max_cols
+
+# Split by comma and clean up
+parts = [part.strip() for part in input_str.split(',')]
+columns = []
+
+for part in parts:
+    try:
+        col_num = int(part)
+        if 1 <= col_num <= max_cols:
+            columns.append(col_num)
+        else:
+            print(f'ERROR: Column {col_num} is out of range (1-{max_cols})')
+            sys.exit(1)
+    except ValueError:
+        print(f'ERROR: \"{part}\" is not a valid column number')
+        sys.exit(1)
+
+if not columns:
+    print('ERROR: No valid columns specified')
+    sys.exit(1)
+
+# Remove duplicates while preserving order
+seen = set()
+unique_columns = []
+for col in columns:
+    if col not in seen:
+        seen.add(col)
+        unique_columns.append(col)
+
+print(','.join(map(str, unique_columns)))
+"
+}
+
+# Function to preview match statistics before extending
+preview_csv_extension() {
+    local file1="$1"
+    local file2="$2"
+    local match_cols1="$3"
+    local match_cols2="$4"
+    local extend_file="$5"  # "file1" or "file2"
+    local source_cols="$6"  # columns to add from source file
+    local match_type="$7"   # "exact" or "substring"
+    
+    python3 -c "
+import csv
+import sys
+from collections import OrderedDict
+
+def read_csv_to_dict(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            # Pad row if it has fewer columns than headers
+            while len(row) < len(headers):
+                row.append('')
+            
+            # Create row dict
+            row_dict = {}
+            for i, header in enumerate(headers):
+                row_dict[header.strip()] = row[i] if i < len(row) else ''
+            
+            data.append(row_dict)
+    
+    return data, [h.strip() for h in headers]
+
+def create_match_key(row, headers, col_indices):
+    key_parts = []
+    for col_idx in col_indices:
+        if col_idx < len(headers):
+            header = headers[col_idx]
+            value = row.get(header, '').strip()
+            key_parts.append(value)
+    return '|||'.join(key_parts)  # Use unlikely separator
+
+def check_substring_match(target_key, source_keys):
+    \"\"\"Check if target_key matches any source_key using substring logic\"\"\"
+    target_parts = target_key.split('|||')
+    
+    for source_key in source_keys:
+        source_parts = source_key.split('|||')
+        
+        # Both keys must have same number of parts
+        if len(target_parts) != len(source_parts):
+            continue
+            
+        # Check if each target part is a substring of corresponding source part
+        match = True
+        for t_part, s_part in zip(target_parts, source_parts):
+            if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
+                match = False
+                break
+        
+        if match:
+            return source_key
+    
+    return None
+
+# Parse column specifications
+match_cols1 = [int(x) - 1 for x in '$match_cols1'.split(',')]  # Convert to 0-based
+match_cols2 = [int(x) - 1 for x in '$match_cols2'.split(',')]  # Convert to 0-based
+source_cols = [int(x) - 1 for x in '$source_cols'.split(',')]  # Convert to 0-based
+match_type = '$match_type'
+
+# Read both files
+file1_data, file1_headers = read_csv_to_dict('$file1')
+file2_data, file2_headers = read_csv_to_dict('$file2')
+
+extend_file = '$extend_file'
+
+print(f'📊 PREVIEW - Match Analysis')
+print(f'═══════════════════════════')
+
+# Display match type
+match_type_display = 'Exact Match' if match_type == 'exact' else 'Substring Match (target ⊆ source)'
+print(f'Match Type: {match_type_display}')
+print()
+
+if extend_file == 'file1':
+    target_data = file1_data
+    target_headers = file1_headers
+    source_data = file2_data
+    source_headers = file2_headers
+    target_match_cols = match_cols1
+    source_match_cols = match_cols2
+    target_file_name = '$file1'
+    source_file_name = '$file2'
+    print(f'Target file (to extend): $file1')
+    for col_idx in match_cols1:
+        if col_idx < len(file1_headers):
+            print(f'  → Matching on: {file1_headers[col_idx]}')
+    print(f'Source file: $file2')
+    for col_idx in match_cols2:
+        if col_idx < len(file2_headers):
+            print(f'  → Matching on: {file2_headers[col_idx]}')
+else:
+    target_data = file2_data
+    target_headers = file2_headers
+    source_data = file1_data
+    source_headers = file1_headers
+    target_match_cols = match_cols2
+    source_match_cols = match_cols1
+    target_file_name = '$file2'
+    source_file_name = '$file1'
+    print(f'Target file (to extend): $file2')
+    for col_idx in match_cols2:
+        if col_idx < len(file2_headers):
+            print(f'  → Matching on: {file2_headers[col_idx]}')
+    print(f'Source file: $file1')
+    for col_idx in match_cols1:
+        if col_idx < len(file1_headers):
+            print(f'  → Matching on: {file1_headers[col_idx]}')
+
+print()
+print(f'Columns to be added:')
+for col_idx in source_cols:
+    if col_idx < len(source_headers):
+        print(f'  → {source_headers[col_idx]}')
+print()
+
+# Create lookup dictionary from source file
+source_lookup = {}
+source_keys = []
+for row in source_data:
+    match_key = create_match_key(row, source_headers, source_match_cols)
+    if match_key.strip('|'):  # Only add if not all empty
+        source_lookup[match_key] = row
+        source_keys.append(match_key)
+
+# Analyze matches without creating the extended data
+matches_found = 0
+total_target_rows = len(target_data)
+
+for row in target_data:
+    target_key = create_match_key(row, target_headers, target_match_cols)
+    
+    if match_type == 'exact':
+        if target_key in source_lookup:
+            matches_found += 1
+    else:  # substring matching
+        if check_substring_match(target_key, source_keys):
+            matches_found += 1
+
+# Calculate statistics
+match_percentage = (matches_found / total_target_rows * 100) if total_target_rows > 0 else 0
+no_match_count = total_target_rows - matches_found
+
+print(f'📈 MATCH STATISTICS')
+print(f'═══════════════════')
+print(f'Total rows in target file: {total_target_rows:,}')
+print(f'Rows with matches: {matches_found:,} ({match_percentage:.1f}%)')
+print(f'Rows without matches: {no_match_count:,} ({100-match_percentage:.1f}%)')
+print(f'Columns to be added: {len(source_cols)}')
+print()
+
+# Show some examples of what will happen
+print(f'💡 IMPACT PREVIEW')
+print(f'═════════════════')
+if matches_found > 0:
+    print(f'✓ {matches_found:,} rows will get new data added')
+else:
+    print(f'⚠️  NO MATCHES FOUND - All new columns will be empty!')
+
+if no_match_count > 0:
+    print(f'⚠️  {no_match_count:,} rows will have empty values for new columns')
+
+print()
+"
+}
+
+# Function to extend CSV files based on specified columns
+extend_csv_files() {
+    local file1="$1"
+    local file2="$2"
+    local match_cols1="$3"
+    local match_cols2="$4"
+    local extend_file="$5"  # "file1" or "file2"
+    local source_cols="$6"  # columns to add from source file
+    local match_type="$7"   # "exact" or "substring"
+    
+    python3 -c "
+import csv
+import sys
+from collections import OrderedDict
+
+def read_csv_to_dict(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            # Pad row if it has fewer columns than headers
+            while len(row) < len(headers):
+                row.append('')
+            
+            # Create row dict
+            row_dict = {}
+            for i, header in enumerate(headers):
+                row_dict[header.strip()] = row[i] if i < len(row) else ''
+            
+            data.append(row_dict)
+    
+    return data, [h.strip() for h in headers]
+
+def create_match_key(row, headers, col_indices):
+    key_parts = []
+    for col_idx in col_indices:
+        if col_idx < len(headers):
+            header = headers[col_idx]
+            value = row.get(header, '').strip()
+            key_parts.append(value)
+    return '|||'.join(key_parts)  # Use unlikely separator
+
+def check_substring_match(target_key, source_keys):
+    \"\"\"Check if target_key matches any source_key using substring logic\"\"\"
+    target_parts = target_key.split('|||')
+    
+    for source_key in source_keys:
+        source_parts = source_key.split('|||')
+        
+        # Both keys must have same number of parts
+        if len(target_parts) != len(source_parts):
+            continue
+            
+        # Check if each target part is a substring of corresponding source part
+        match = True
+        for t_part, s_part in zip(target_parts, source_parts):
+            if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
+                match = False
+                break
+        
+        if match:
+            return source_key
+    
+    return None
+
+def write_csv_from_dict_list(filename, data, fieldnames):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(data)
+
+# Parse column specifications
+match_cols1 = [int(x) - 1 for x in '$match_cols1'.split(',')]  # Convert to 0-based
+match_cols2 = [int(x) - 1 for x in '$match_cols2'.split(',')]  # Convert to 0-based
+source_cols = [int(x) - 1 for x in '$source_cols'.split(',')]  # Convert to 0-based
+match_type = '$match_type'
+
+# Read both files
+file1_data, file1_headers = read_csv_to_dict('$file1')
+file2_data, file2_headers = read_csv_to_dict('$file2')
+
+extend_file = '$extend_file'
+
+# Determine which file is target and which is source
+if extend_file == 'file1':
+    target_data = file1_data
+    target_headers = file1_headers
+    source_data = file2_data
+    source_headers = file2_headers
+    target_match_cols = match_cols1
+    source_match_cols = match_cols2
+    target_file_name = '$file1'
+    source_file_name = '$file2'
+else:
+    target_data = file2_data
+    target_headers = file2_headers
+    source_data = file1_data
+    source_headers = file1_headers
+    target_match_cols = match_cols2
+    source_match_cols = match_cols1
+    target_file_name = '$file2'
+    source_file_name = '$file1'
+
+# Create lookup dictionary from source file
+source_lookup = {}
+source_keys = []
+for row in source_data:
+    match_key = create_match_key(row, source_headers, source_match_cols)
+    if match_key.strip('|'):  # Only add if not all empty
+        source_lookup[match_key] = row
+        source_keys.append(match_key)
+
+# Prepare new headers for extended file
+extended_headers = target_headers.copy()
+new_column_names = []
+
+for col_idx in source_cols:
+    if col_idx < len(source_headers):
+        source_col_name = source_headers[col_idx]
+        # Check if column name already exists in target
+        base_name = source_col_name
+        counter = 1
+        final_name = base_name
+        while final_name in extended_headers:
+            final_name = f'{base_name}_{counter}'
+            counter += 1
+        extended_headers.append(final_name)
+        new_column_names.append((source_col_name, final_name))
+
+# Extend target data
+extended_data = []
+matches_found = 0
+
+for row in target_data:
+    target_key = create_match_key(row, target_headers, target_match_cols)
+    
+    # Create new row with existing data
+    new_row = row.copy()
+    
+    # Find matching source row based on match type
+    matched_source_key = None
+    if match_type == 'exact':
+        if target_key in source_lookup:
+            matched_source_key = target_key
+    else:  # substring matching
+        matched_source_key = check_substring_match(target_key, source_keys)
+    
+    # Add new columns
+    if matched_source_key:
+        source_row = source_lookup[matched_source_key]
+        matches_found += 1
+        for source_col_name, new_col_name in new_column_names:
+            new_row[new_col_name] = source_row.get(source_col_name, '')
+    else:
+        # No match found, add empty values for new columns
+        for source_col_name, new_col_name in new_column_names:
+            new_row[new_col_name] = ''
+    
+    extended_data.append(new_row)
+
+# Generate output filename
+target_basename = target_file_name.replace('.csv', '').replace('./', '')
+output_file = f'{target_basename}_extended.csv'
+
+# Write extended file
+write_csv_from_dict_list(output_file, extended_data, extended_headers)
+
+print(f'✓ Successfully created: {output_file}')
+print(f'  Final result: {len(extended_data):,} rows with {len(new_column_names)} new columns added')
+"
+}
+
+# Main script
+main() {
+    echo "🔍 Scanning for CSV files in current directory..."
+    
+    # Find all CSV files using shell globbing (more reliable than find)
+    csv_files=()
+    shopt -s nullglob  # Handle case where no CSV files exist
+    for file in *.csv; do
+        if [[ -f "$file" ]]; then
+            csv_files+=("$file")
+        fi
+    done
+    shopt -u nullglob
+    
+    # Sort the files for consistent ordering
+    if [[ ${#csv_files[@]} -gt 0 ]]; then
+        IFS=$'\n' csv_files=($(sort <<<"${csv_files[*]}"))
+        unset IFS
+    fi
+    
+    local num_files=${#csv_files[@]}
+    
+    if [[ $num_files -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    elif [[ $num_files -eq 1 ]]; then
+        echo "❌ Only 1 CSV file found. Need exactly 2 files for extending."
+        echo "   Found: ${csv_files[0]}"
+        exit 1
+    elif [[ $num_files -gt 2 ]]; then
+        echo "❌ Found $num_files CSV files. Need exactly 2 files for extending."
+        echo "   Found files:"
+        printf '     %s\n' "${csv_files[@]}"
+        exit 1
+    fi
+    
+    local file1="${csv_files[0]}"
+    local file2="${csv_files[1]}"
+    
+    echo "📁 Found exactly 2 CSV files:"
+    echo "   File 1: $file1"
+    echo "   File 2: $file2"
+    echo
+    
+    # Check if files are readable
+    if [[ ! -r "$file1" ]]; then
+        echo "❌ Cannot read $file1"
+        exit 1
+    fi
+    
+    if [[ ! -r "$file2" ]]; then
+        echo "❌ Cannot read $file2"
+        exit 1
+    fi
+    
+    # Show headers
+    echo "📋 File headers:"
+    echo
+    echo "File 1: $file1"
+    get_columns "$file1"
+    echo
+    echo "File 2: $file2"
+    get_columns "$file2"
+    echo
+    
+    # Get number of columns for each file
+    local num_cols1=$(python3 -c "
+import csv
+with open('$file1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    print(len(headers))
+")
+    
+    local num_cols2=$(python3 -c "
+import csv
+with open('$file2', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    headers = next(reader)
+    print(len(headers))
+")
+    
+    # Choose which file to extend
+    echo "Choose which file to extend (add columns to):"
+    echo "  1) Extend File 1: $file1"
+    echo "  2) Extend File 2: $file2"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-2): " -r choice
+        case $choice in
+            1)
+                extend_file="file1"
+                target_file="$file1"
+                source_file="$file2"
+                target_num_cols="$num_cols1"
+                source_num_cols="$num_cols2"
+                break
+                ;;
+            2)
+                extend_file="file2"
+                target_file="$file2"
+                source_file="$file1"
+                target_num_cols="$num_cols2"
+                source_num_cols="$num_cols1"
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+    
+    echo
+    echo "Target file (to extend): $target_file"
+    echo "Source file (to get columns from): $source_file"
+    echo
+    
+    # Get matching columns for target file
+    echo "Select matching column(s) from target file ($target_file):"
+    if [[ "$extend_file" == "file1" ]]; then
+        get_columns "$file1"
+    else
+        get_columns "$file2"
+    fi
+    echo
+    
+    while true; do
+        read -p "Enter column number(s) for matching (comma-separated, 1-$target_num_cols): " -r target_match_input
+        target_match_cols=$(parse_column_numbers "$target_match_input" "$target_num_cols")
+        if [[ $? -eq 0 ]]; then
+            break
+        fi
+    done
+    
+    echo
+    
+    # Get matching columns for source file
+    echo "Select matching column(s) from source file ($source_file):"
+    if [[ "$extend_file" == "file1" ]]; then
+        get_columns "$file2"
+    else
+        get_columns "$file1"
+    fi
+    echo
+    
+    while true; do
+        read -p "Enter column number(s) for matching (comma-separated, 1-$source_num_cols): " -r source_match_input
+        source_match_cols=$(parse_column_numbers "$source_match_input" "$source_num_cols")
+        if [[ $? -eq 0 ]]; then
+            break
+        fi
+    done
+    
+    echo
+    
+    # Get columns to add from source file
+    echo "Select column(s) to add from source file ($source_file):"
+    if [[ "$extend_file" == "file1" ]]; then
+        get_columns "$file2"
+    else
+        get_columns "$file1"
+    fi
+    echo
+    
+    while true; do
+        read -p "Enter column number(s) to add (comma-separated, 1-$source_num_cols): " -r add_cols_input
+        add_cols=$(parse_column_numbers "$add_cols_input" "$source_num_cols")
+        if [[ $? -eq 0 ]]; then
+            break
+        fi
+    done
+    
+    echo
+    
+    # Choose match type
+    echo "Choose matching type:"
+    echo "  1) Exact match (values must be identical)"
+    echo "  2) Substring match (target value is contained in source value)"
+    echo "     Example: 'Apple' matches 'Green Apple Inc'"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-2): " -r choice
+        case $choice in
+            1)
+                match_type="exact"
+                echo "Selected: Exact matching"
+                break
+                ;;
+            2)
+                match_type="substring"
+                echo "Selected: Substring matching (target ⊆ source)"
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+    
+    echo
+    echo "📝 Analyzing match potential..."
+    echo
+    
+    # First, show preview of what will happen
+    if [[ "$extend_file" == "file1" ]]; then
+        preview_csv_extension "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type"
+    else
+        preview_csv_extension "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type"
+    fi
+    
+    # Ask for confirmation
+    echo "❓ Do you want to proceed with the extension?"
+    echo "   This will create a new file: ${target_file%.*}_extended.csv"
+    echo
+    
+    while true; do
+        read -p "Continue? (y/n): " -r choice
+        case $choice in
+            [Yy]*)
+                echo
+                echo "📝 Creating extended CSV file..."
+                break
+                ;;
+            [Nn]*)
+                echo "❌ Extension cancelled."
+                exit 0
+                ;;
+            *)
+                echo "❌ Please enter 'y' for yes or 'n' for no."
+                ;;
+        esac
+    done
+    
+    # Proceed with actual extension
+    if [[ "$extend_file" == "file1" ]]; then
+        extend_csv_files "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type"
+    else
+        extend_csv_files "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type"
+    fi
+    
+    echo "🎉 CSV extension completed successfully!"
+}
+
+# Run main function
+main "$@"

@@ -1,0 +1,479 @@
+#!/bin/bash
+
+# CSV Join Script
+# Joins CSV files with identical headers in the current directory
+
+set -e  # Exit on any error
+
+# Function to get CSV header
+get_header() {
+    head -n 1 "$1" | sed 's/\r$//'
+}
+
+# Function to normalize column names for comparison
+normalize_columns() {
+    echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort | paste -sd ','
+}
+
+# Function to find longest common substring of all filenames
+find_common_base() {
+    python3 -c "
+import sys
+import os
+import re
+
+files = '''$1'''.strip().split('\n')
+if not files or files == ['']:
+    print('joined')
+    sys.exit()
+
+# Remove paths and extensions
+basenames = []
+for f in files:
+    base = os.path.basename(f).replace('.csv', '')
+    basenames.append(base)
+
+if len(basenames) == 1:
+    # Remove trailing numbers and underscores
+    result = re.sub(r'[_\-\s]*[0-9]+[_\-\s]*$', '', basenames[0])
+    print(result.strip('_- ') if result.strip('_- ') else 'joined')
+    sys.exit()
+
+# Find longest common substring among all files
+def longest_common_substring_multiple(strings):
+    if not strings:
+        return ''
+    
+    first = strings[0]
+    max_len = 0
+    result = ''
+    
+    for i in range(len(first)):
+        for j in range(i + 1, len(first) + 1):
+            substr = first[i:j]
+            if all(substr in s for s in strings[1:]) and len(substr) > max_len:
+                max_len = len(substr)
+                result = substr
+    
+    return result
+
+common = longest_common_substring_multiple(basenames)
+
+# Clean up the result
+if common:
+    common = re.sub(r'[_\-\s]*[0-9]+[_\-\s]*$', '', common)
+    common = common.strip('_- ')
+
+if common and len(common) >= 3:
+    print(common)
+else:
+    # Fallback: use first part of first filename
+    first_parts = basenames[0].split('_')[0].split('-')[0].split(' ')[0]
+    print(first_parts if first_parts and len(first_parts) >= 3 else 'joined')
+"
+}
+
+# Function to display file selection menu
+select_files() {
+    local available_files=("$@")
+    local selected_files=()
+    local file_statuses=()
+    
+    # Initialize all files as unselected
+    for i in "${!available_files[@]}"; do
+        file_statuses[i]="false"
+    done
+    
+    while true; do
+        clear
+        echo "📁 CSV File Selection"
+        echo "=================================="
+        echo "Select files to join (minimum 2 required):"
+        echo
+        
+        # Display files with selection status
+        for i in "${!available_files[@]}"; do
+            local status="[ ]"
+            if [[ "${file_statuses[i]}" == "true" ]]; then
+                status="[✓]"
+            fi
+            printf "%2d) %s %s\n" $((i+1)) "$status" "$(basename "${available_files[i]}")"
+        done
+        
+        echo
+        echo "Commands:"
+        echo "  1-${#available_files[@]}: Toggle file selection"
+        echo "  a: Select all files"
+        echo "  c: Clear all selections"
+        echo "  d: Done (proceed with selected files)"
+        echo "  q: Quit"
+        echo
+        
+        # Count selected files
+        local selected_count=0
+        for status in "${file_statuses[@]}"; do
+            if [[ "$status" == "true" ]]; then
+                ((selected_count++))
+            fi
+        done
+        
+        echo "Selected files: $selected_count"
+        if [[ $selected_count -lt 2 ]]; then
+            echo "⚠️  Need at least 2 files to join"
+        fi
+        echo
+        
+        read -p "Enter choice: " -r choice
+        
+        case "$choice" in
+            [1-9]|[1-9][0-9]|[1-9][0-9][0-9])
+                if [[ $choice -ge 1 && $choice -le ${#available_files[@]} ]]; then
+                    local idx=$((choice-1))
+                    if [[ "${file_statuses[idx]}" == "true" ]]; then
+                        file_statuses[idx]="false"
+                    else
+                        file_statuses[idx]="true"
+                    fi
+                else
+                    echo "Invalid file number. Press Enter to continue..."
+                    read
+                fi
+                ;;
+            a|A)
+                for i in "${!file_statuses[@]}"; do
+                    file_statuses[i]="true"
+                done
+                ;;
+            c|C)
+                for i in "${!file_statuses[@]}"; do
+                    file_statuses[i]="false"
+                done
+                ;;
+            d|D)
+                if [[ $selected_count -lt 2 ]]; then
+                    echo "❌ Need at least 2 files to join. Press Enter to continue..."
+                    read
+                    continue
+                fi
+                
+                # Build selected files array
+                selected_files=()
+                for i in "${!available_files[@]}"; do
+                    if [[ "${file_statuses[i]}" == "true" ]]; then
+                        selected_files+=("${available_files[i]}")
+                    fi
+                done
+                break
+                ;;
+            q|Q)
+                echo "❌ Operation cancelled."
+                exit 1
+                ;;
+            *)
+                echo "Invalid choice. Press Enter to continue..."
+                read
+                ;;
+        esac
+    done
+    
+    # Return selected files via global variable
+    csv_files=("${selected_files[@]}")
+}
+
+# Function to count rows in a file
+count_rows() {
+    tail -n +2 "$1" | wc -l | tr -d ' '
+}
+
+# Function to display join summary
+display_summary() {
+    local files=("$@")
+    local total_data_rows=0
+    
+    echo "📊 Join Summary"
+    echo "=================================="
+    echo "Files to be joined:"
+    
+    for file in "${files[@]}"; do
+        local rows=$(count_rows "$file")
+        total_data_rows=$((total_data_rows + rows))
+        printf "   %s: %s data rows\n" "$(basename "$file")" "$rows"
+    done
+    
+    echo
+    echo "📈 Total data rows in result: $total_data_rows"
+    echo "📝 Result will have: 1 header row + $total_data_rows data rows = $((total_data_rows + 1)) total rows"
+    echo
+    
+    read -p "Proceed with joining these files? (Y/n): " -r confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        echo "❌ Operation cancelled."
+        exit 1
+    fi
+}
+
+# Main script
+main() {
+    echo "🔍 Scanning for CSV files in current directory..."
+    
+    # Find all CSV files (compatible with older Bash)
+    local all_csv_files=()
+    while IFS= read -r -d '' file; do
+        all_csv_files+=("$file")
+    done < <(find . -maxdepth 1 -name "*.csv" -type f -print0 | sort -z)
+    
+    if [[ ${#all_csv_files[@]} -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    fi
+    
+    if [[ ${#all_csv_files[@]} -eq 1 ]]; then
+        echo "❌ Only one CSV file found. Need at least 2 files to join."
+        exit 1
+    fi
+    
+    # Let user select files to join
+    select_files "${all_csv_files[@]}"
+    
+    echo "📁 Selected ${#csv_files[@]} files for joining:"
+    printf '   %s\n' "${csv_files[@]}"
+    echo
+    
+    # Check if all files are readable and get their headers
+    echo "🔍 Checking file headers..."
+    
+    local reference_file=""
+    local reference_header=""
+    local reference_columns=""
+    local all_files_valid=()
+    local headers_identical=true
+    local different_order_files=()
+    
+    for file in "${csv_files[@]}"; do
+        if [[ ! -r "$file" ]]; then
+            echo "⚠️  Warning: Cannot read $file, skipping..."
+            continue
+        fi
+        
+        local current_header=$(get_header "$file")
+        local current_columns=$(normalize_columns "$current_header")
+        
+        if [[ -z "$reference_file" ]]; then
+            reference_file="$file"
+            reference_header="$current_header"
+            reference_columns="$current_columns"
+            all_files_valid+=("$file")
+            echo "   ✓ $file (reference)"
+        else
+            if [[ "$current_columns" != "$reference_columns" ]]; then
+                echo "   ❌ $file - Different columns!"
+                echo "      Reference: $reference_header"
+                echo "      This file: $current_header"
+                echo "      Reference columns (sorted): $reference_columns"
+                echo "      This file columns (sorted): $current_columns"
+                echo
+                echo "Cannot join files with different column sets."
+                exit 1
+            elif [[ "$current_header" != "$reference_header" ]]; then
+                headers_identical=false
+                different_order_files+=("$file")
+                echo "   ⚠️  $file - Same columns, different order"
+                all_files_valid+=("$file")
+            else
+                echo "   ✓ $file (identical header)"
+                all_files_valid+=("$file")
+            fi
+        fi
+    done
+    
+    if [[ ${#all_files_valid[@]} -lt 2 ]]; then
+        echo "❌ Need at least 2 valid CSV files to join."
+        exit 1
+    fi
+    
+    # Generate output filename
+    local files_list=$(printf '%s\n' "${all_files_valid[@]}")
+    local base_name=$(find_common_base "$files_list")
+    local output_file="${base_name}_joined.csv"
+    
+    echo
+    echo "📝 Files to join: ${#all_files_valid[@]}"
+    echo "   Output file: $output_file"
+    echo
+    
+    # Display summary before joining
+    display_summary "${all_files_valid[@]}"
+    
+    if [[ "$headers_identical" == true ]]; then
+        echo "✅ All headers are identical. Proceeding with join..."
+        
+        if [[ -e "$output_file" ]]; then
+            read -p "⚠️  Output file '$output_file' already exists. Overwrite? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "❌ Operation cancelled."
+                exit 1
+            fi
+        fi
+        
+        echo
+        echo "🔗 Joining files..."
+        
+        # Write header from reference file
+        echo "$reference_header" > "$output_file"
+        
+        # Append data from all files (skip header)
+        local total_rows=0
+        for file in "${all_files_valid[@]}"; do
+            local rows=$(tail -n +2 "$file" | wc -l | tr -d ' ')
+            if [[ $rows -gt 0 ]]; then
+                tail -n +2 "$file" >> "$output_file"
+                total_rows=$((total_rows + rows))
+                echo "   ✓ Added $rows rows from $(basename "$file")"
+            else
+                echo "   ⚠️  No data rows in $(basename "$file")"
+            fi
+        done
+        
+        echo
+        echo "🎉 Successfully created $output_file with $total_rows data rows!"
+        
+    else
+        echo "⚠️  Files have the same columns but in different orders:"
+        echo
+        echo "Order 1 (reference): $reference_header"
+        echo "   Files: $(basename "$reference_file")"
+        for file in "${all_files_valid[@]}"; do
+            if [[ "$file" != "$reference_file" ]]; then
+                local file_header=$(get_header "$file")
+                if [[ "$file_header" == "$reference_header" ]]; then
+                    echo "          $(basename "$file")"
+                fi
+            fi
+        done
+        echo
+        
+        # Show other orders
+        local order_num=2
+        local processed_headers=("$reference_header")
+        
+        for file in "${different_order_files[@]}"; do
+            local file_header=$(get_header "$file")
+            local already_shown=false
+            
+            for shown_header in "${processed_headers[@]}"; do
+                if [[ "$file_header" == "$shown_header" ]]; then
+                    already_shown=true
+                    break
+                fi
+            done
+            
+            if [[ "$already_shown" == false ]]; then
+                echo "Order $order_num: $file_header"
+                echo "   Files: $(basename "$file")"
+                
+                # Find other files with this header
+                for other_file in "${different_order_files[@]}"; do
+                    if [[ "$other_file" != "$file" ]]; then
+                        local other_header=$(get_header "$other_file")
+                        if [[ "$other_header" == "$file_header" ]]; then
+                            echo "          $(basename "$other_file")"
+                        fi
+                    fi
+                done
+                
+                processed_headers+=("$file_header")
+                ((order_num++))
+                echo
+            fi
+        done
+        
+        read -p "Choose column order (1-$((order_num-1))) or 'q' to quit: " -r choice
+        
+        if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+            echo "❌ Operation cancelled."
+            exit 1
+        fi
+        
+        if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt $((order_num-1)) ]]; then
+            echo "❌ Invalid choice."
+            exit 1
+        fi
+        
+        # Get chosen header
+        local chosen_header=""
+        if [[ $choice -eq 1 ]]; then
+            chosen_header="$reference_header"
+        else
+            local current_order=2
+            for header in "${processed_headers[@]:1}"; do
+                if [[ $current_order -eq $choice ]]; then
+                    chosen_header="$header"
+                    break
+                fi
+                ((current_order++))
+            done
+        fi
+        
+        echo
+        # Display summary before joining
+        display_summary "${all_files_valid[@]}"
+        
+        if [[ -e "$output_file" ]]; then
+            read -p "⚠️  Output file '$output_file' already exists. Overwrite? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "❌ Operation cancelled."
+                exit 1
+            fi
+        fi
+        
+        echo
+        echo "🔗 Joining files with chosen column order..."
+        echo "$chosen_header" > "$output_file"
+        
+        # Process each file and reorder columns if needed
+        local total_rows=0
+        for file in "${all_files_valid[@]}"; do
+            local file_header=$(get_header "$file")
+            
+            if [[ "$file_header" == "$chosen_header" ]]; then
+                # Same order, just append data
+                local rows=$(tail -n +2 "$file" | wc -l | tr -d ' ')
+                if [[ $rows -gt 0 ]]; then
+                    tail -n +2 "$file" >> "$output_file"
+                    total_rows=$((total_rows + rows))
+                    echo "   ✓ Added $rows rows from $(basename "$file") (same order)"
+                fi
+            else
+                # Need to reorder columns using Python
+                local rows=$(python3 -c "
+import csv
+import sys
+
+try:
+    with open('$file', 'r') as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    
+    chosen_cols = '$chosen_header'.split(',')
+    for row in rows:
+        reordered = [row.get(col.strip(), '') for col in chosen_cols]
+        print(','.join(['\"' + str(cell).replace('\"', '\"\"') + '\"' for cell in reordered]))
+except Exception as e:
+    print(f'Error processing file: {e}', file=sys.stderr)
+    sys.exit(1)
+" | tee -a "$output_file" | wc -l | tr -d ' ')
+                
+                total_rows=$((total_rows + rows))
+                echo "   ✓ Added $rows rows from $(basename "$file") (reordered columns)"
+            fi
+        done
+        
+        echo
+        echo "🎉 Successfully created $output_file with $total_rows data rows!"
+    fi
+}
+
+# Run main function
+main "$@"

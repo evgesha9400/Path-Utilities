@@ -1,0 +1,352 @@
+#!/bin/bash
+
+# CSV Split Script
+# Splits a CSV file into multiple files using two different strategies
+
+set -e  # Exit on any error
+
+# Function to get CSV header
+get_header() {
+    head -n 1 "$1"
+}
+
+# Function to count data rows (excluding header)
+count_data_rows() {
+    tail -n +2 "$1" | wc -l | tr -d ' '
+}
+
+# Function to show menu
+show_menu() {
+    echo "📊 CSV Split Options:"
+    echo
+    echo "1) Split into N files with even row distribution"
+    echo "   - You choose the number of output files"
+    echo "   - Script calculates optimal rows per file"
+    echo
+    echo "2) Split by maximum rows per file"
+    echo "   - You set maximum rows per file"
+    echo "   - Script calculates number of output files needed"
+    echo
+    echo "q) Quit"
+    echo
+}
+
+# Function to validate if file is a proper CSV
+validate_csv_file() {
+    local file="$1"
+    
+    if [[ ! -f "$file" ]]; then
+        echo "❌ File '$file' does not exist."
+        return 1
+    fi
+    
+    if [[ ! -r "$file" ]]; then
+        echo "❌ Cannot read file '$file'."
+        return 1
+    fi
+    
+    # Check if file has content
+    if [[ ! -s "$file" ]]; then
+        echo "❌ File '$file' is empty."
+        return 1
+    fi
+    
+    # Check if it looks like a CSV (has at least one line)
+    local line_count=$(wc -l < "$file" | tr -d ' ')
+    if [[ $line_count -lt 1 ]]; then
+        echo "❌ File '$file' appears to be empty."
+        return 1
+    fi
+    
+    return 0
+}
+
+# Function to split CSV into N files with even distribution
+split_by_count() {
+    local input_file="$1"
+    local num_files="$2"
+    local base_name="$3"
+    
+    local total_rows=$(count_data_rows "$input_file")
+    local header=$(get_header "$input_file")
+    
+    if [[ $total_rows -eq 0 ]]; then
+        echo "❌ No data rows found in the CSV file (only header)."
+        return 1
+    fi
+    
+    # Calculate rows per file
+    local base_rows=$((total_rows / num_files))
+    local extra_rows=$((total_rows % num_files))
+    
+    echo "📊 Split calculation:"
+    echo "   Total data rows: $total_rows"
+    echo "   Number of files: $num_files"
+    echo "   Base rows per file: $base_rows"
+    echo "   Extra rows to distribute: $extra_rows"
+    echo
+    
+    # Show distribution
+    echo "📁 Output files and row mapping:"
+    for ((i=1; i<=num_files; i++)); do
+        local rows_in_file=$base_rows
+        if [[ $i -le $extra_rows ]]; then
+            rows_in_file=$((base_rows + 1))
+        fi
+        printf "   %s - Part %d.csv: %d rows\n" "$base_name" "$i" "$rows_in_file"
+    done
+    echo
+    
+    read -p "Proceed with split? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "❌ Operation cancelled."
+        return 1
+    fi
+    
+    echo "✂️  Splitting file..."
+    
+    # Create temporary file with data only (no header)
+    local temp_data=$(mktemp)
+    tail -n +2 "$input_file" > "$temp_data"
+    
+    local current_row=1
+    for ((i=1; i<=num_files; i++)); do
+        local output_file="${base_name} - Part ${i}.csv"
+        
+        # Calculate rows for this file
+        local rows_in_file=$base_rows
+        if [[ $i -le $extra_rows ]]; then
+            rows_in_file=$((base_rows + 1))
+        fi
+        
+        # Write header
+        echo "$header" > "$output_file"
+        
+        # Write data rows
+        if [[ $rows_in_file -gt 0 ]]; then
+            sed -n "${current_row},$((current_row + rows_in_file - 1))p" "$temp_data" >> "$output_file"
+            current_row=$((current_row + rows_in_file))
+        fi
+        
+        echo "   ✓ Created $output_file with $rows_in_file data rows"
+    done
+    
+    # Clean up
+    rm -f "$temp_data"
+    
+    echo
+    echo "🎉 Successfully split $input_file into $num_files files!"
+}
+
+# Function to split CSV by maximum rows per file
+split_by_max_rows() {
+    local input_file="$1"
+    local max_rows="$2"
+    local base_name="$3"
+    
+    local total_rows=$(count_data_rows "$input_file")
+    local header=$(get_header "$input_file")
+    
+    if [[ $total_rows -eq 0 ]]; then
+        echo "❌ No data rows found in the CSV file (only header)."
+        return 1
+    fi
+    
+    # Calculate number of files needed
+    local num_files=$(( (total_rows + max_rows - 1) / max_rows ))  # Ceiling division
+    
+    echo "📊 Split calculation:"
+    echo "   Total data rows: $total_rows"
+    echo "   Maximum rows per file: $max_rows"
+    echo "   Number of files needed: $num_files"
+    echo
+    
+    # Show distribution
+    echo "📁 Output files and row mapping:"
+    for ((i=1; i<=num_files; i++)); do
+        local start_row=$(( (i-1) * max_rows + 1 ))
+        local end_row=$(( i * max_rows ))
+        if [[ $end_row -gt $total_rows ]]; then
+            end_row=$total_rows
+        fi
+        local rows_in_file=$((end_row - start_row + 1))
+        printf "   %s - Part %d.csv: %d rows\n" "$base_name" "$i" "$rows_in_file"
+    done
+    echo
+    
+    read -p "Proceed with split? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "❌ Operation cancelled."
+        return 1
+    fi
+    
+    echo "✂️  Splitting file..."
+    
+    # Create temporary file with data only (no header)
+    local temp_data=$(mktemp)
+    tail -n +2 "$input_file" > "$temp_data"
+    
+    for ((i=1; i<=num_files; i++)); do
+        local output_file="${base_name} - Part ${i}.csv"
+        local start_row=$(( (i-1) * max_rows + 1 ))
+        local end_row=$(( i * max_rows ))
+        
+        if [[ $end_row -gt $total_rows ]]; then
+            end_row=$total_rows
+        fi
+        
+        local rows_in_file=$((end_row - start_row + 1))
+        
+        # Write header
+        echo "$header" > "$output_file"
+        
+        # Write data rows
+        if [[ $rows_in_file -gt 0 ]]; then
+            sed -n "${start_row},${end_row}p" "$temp_data" >> "$output_file"
+        fi
+        
+        echo "   ✓ Created $output_file with $rows_in_file data rows"
+    done
+    
+    # Clean up
+    rm -f "$temp_data"
+    
+    echo
+    echo "🎉 Successfully split $input_file into $num_files files!"
+}
+
+# Function to display CSV files and get user selection
+select_csv_file() {
+    echo "📁 Scanning current directory for CSV files..." >&2
+    
+    # Scan current working directory for CSV files
+    local csv_files=()
+    while IFS= read -r -d '' file; do
+        # Remove ./ prefix for cleaner display
+        local clean_file=${file#./}
+        csv_files+=("$clean_file")
+    done < <(find . -maxdepth 1 -name "*.csv" -type f -print0 | sort -z)
+    
+    if [[ ${#csv_files[@]} -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory." >&2
+        echo >&2
+        echo "Usage: $0 [input_file.csv]" >&2
+        exit 1
+    fi
+    
+    if [[ ${#csv_files[@]} -eq 1 ]]; then
+        echo "✓ Found 1 CSV file: ${csv_files[0]}" >&2
+        echo "${csv_files[0]}"
+        return
+    fi
+    
+    echo "✓ Found ${#csv_files[@]} CSV files:" >&2
+    echo >&2
+    
+    for i in "${!csv_files[@]}"; do
+        local file="${csv_files[$i]}"
+        local rows=$(count_data_rows "$file")
+        printf "%2d) %s (%d data rows)\n" "$((i+1))" "$file" "$rows" >&2
+    done
+    
+    echo >&2
+    while true; do
+        read -p "Select CSV file to split (1-${#csv_files[@]}): " choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ $choice -ge 1 ]] && [[ $choice -le ${#csv_files[@]} ]]; then
+            echo "${csv_files[$((choice-1))]}"
+            return
+        else
+            echo "❌ Invalid selection. Please enter a number between 1 and ${#csv_files[@]}." >&2
+        fi
+    done
+}
+
+# Main script
+main() {
+    echo "✂️  CSV Split Utility"
+    echo "=================="
+    echo
+    
+    # Check if input file is provided as argument
+    if [[ $# -eq 0 ]]; then
+        input_file=$(select_csv_file)
+    else
+        input_file="$1"
+        # Validate that the provided file exists in current directory
+        if [[ ! -f "$input_file" ]]; then
+            echo "❌ File '$input_file' not found in current directory."
+            exit 1
+        fi
+    fi
+    
+    # Validate input file
+    if ! validate_csv_file "$input_file"; then
+        exit 1
+    fi
+    
+    # Get base name for output files (remove extension and path)
+    local base_name=$(basename "$input_file" .csv)
+    
+    # Show file info
+    local total_rows=$(count_data_rows "$input_file")
+    local header=$(get_header "$input_file")
+    echo "📄 Input file: $input_file"
+    echo "   Total data rows: $total_rows"
+    echo "   Header: $header"
+    echo
+    
+    if [[ $total_rows -eq 0 ]]; then
+        echo "❌ No data rows to split (file contains only header)."
+        exit 1
+    fi
+    
+    # Show menu and get choice
+    show_menu
+    read -p "Choose option (1, 2, or q): " -r choice
+    
+    case "$choice" in
+        1)
+            echo
+            read -p "Enter number of files to create: " num_files
+            
+            if [[ ! "$num_files" =~ ^[0-9]+$ ]] || [[ $num_files -lt 1 ]]; then
+                echo "❌ Invalid number of files. Must be a positive integer."
+                exit 1
+            fi
+            
+            if [[ $num_files -gt $total_rows ]]; then
+                echo "❌ Cannot create more files ($num_files) than data rows ($total_rows)."
+                exit 1
+            fi
+            
+            echo
+            split_by_count "$input_file" "$num_files" "$base_name"
+            ;;
+        2)
+            echo
+            read -p "Enter maximum rows per file: " max_rows
+            
+            if [[ ! "$max_rows" =~ ^[0-9]+$ ]] || [[ $max_rows -lt 1 ]]; then
+                echo "❌ Invalid number of rows. Must be a positive integer."
+                exit 1
+            fi
+            
+            echo
+            split_by_max_rows "$input_file" "$max_rows" "$base_name"
+            ;;
+        q|Q)
+            echo "❌ Operation cancelled."
+            exit 0
+            ;;
+        *)
+            echo "❌ Invalid choice."
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"

@@ -1,0 +1,390 @@
+#!/bin/bash
+
+# CSV Exact Deduplication Script
+# Removes completely identical rows from a CSV file
+
+set -e  # Exit on any error
+
+echo "🔍 EXACT DEDUPLICATION"
+echo "════════════════════════════════════════════════════════════════"
+echo "This script removes rows that are completely identical across ALL columns."
+echo "• Compares entire rows byte-for-byte"
+echo "• Default behavior: keeps first occurrence of each duplicate set"
+echo "• Optional: manual selection allows you to choose which duplicate to keep"
+echo "════════════════════════════════════════════════════════════════"
+echo
+
+# Function to get total row count
+get_row_count() {
+    python3 -c "
+import csv
+with open('$1', 'r', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    next(reader)  # Skip header
+    count = sum(1 for row in reader)
+    print(count)
+"
+}
+
+# Function to analyze exact duplicates
+analyze_exact_duplicates() {
+    local input_file="$1"
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            # Pad row if it has fewer columns than headers
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num + 2))  # +2 because we skip header and want 1-based line numbers
+    
+    return data, headers
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+original_count = len(data)
+
+print(f'📊 File Analysis:')
+print(f'   Total rows: {original_count:,}')
+print()
+
+# Group rows by exact content
+duplicate_groups = defaultdict(list)
+
+for row_data, line_num in data:
+    # Create key from entire row
+    key = tuple(cell.strip() for cell in row_data)
+    duplicate_groups[key].append((row_data, line_num))
+
+# Find duplicates
+duplicate_keys = [key for key, rows in duplicate_groups.items() if len(rows) > 1]
+total_duplicates = sum(len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1)
+
+if len(duplicate_keys) == 0:
+    print('✅ No exact duplicates found!')
+    print(f'   All {original_count:,} rows are unique.')
+    print('RETURN_CODE:0')
+else:
+    print(f'📊 Duplicate Summary:')
+    print(f'   Unique groups with duplicates: {len(duplicate_keys):,}')
+    print(f'   Total duplicate rows to remove: {total_duplicates:,}')
+    print(f'   Final row count after deduplication: {original_count - total_duplicates:,}')
+    print(f'   Reduction: {(total_duplicates/original_count*100):.1f}%')
+    print()
+    
+    # Show examples of duplicates (limit to first 5 groups)
+    print('🔍 Duplicate Examples:')
+    
+    shown_groups = 0
+    max_groups_to_show = 5
+    
+    for key, rows in duplicate_groups.items():
+        if len(rows) <= 1 or shown_groups >= max_groups_to_show:
+            continue
+            
+        shown_groups += 1
+        print(f'\\n   Group {shown_groups}: {len(rows)} identical rows')
+        print(f'     Content preview: {str(key)[:100]}...' if len(str(key)) > 100 else f'     Content: {key}')
+        print(f'     Found on lines: {\", \".join(str(row[1]) for row in rows)}')
+    
+    if len(duplicate_keys) > max_groups_to_show:
+        remaining = len(duplicate_keys) - max_groups_to_show
+        print(f'\\n   ... and {remaining} more duplicate group(s)')
+    
+    print(f'\\nRETURN_CODE:{total_duplicates}')
+"
+}
+
+# Function to manually select from duplicates
+manual_deduplication() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num + 2))
+    
+    return data, headers
+
+def write_csv_data(filename, rows, headers):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
+def display_row(row, headers, line_num):
+    print(f'     Line {line_num}:')
+    for i, (header, value) in enumerate(zip(headers, row)):
+        if value.strip():  # Only show non-empty values
+            display_value = value[:50] + '...' if len(value) > 50 else value
+            print(f'       {header}: {display_value}')
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+
+# Group rows by exact content
+duplicate_groups = defaultdict(list)
+for row_data, line_num in data:
+    key = tuple(cell.strip() for cell in row_data)
+    duplicate_groups[key].append((row_data, line_num))
+
+# Process duplicates with manual selection
+selected_rows = []
+group_num = 0
+
+for key, rows in duplicate_groups.items():
+    if len(rows) == 1:
+        # No duplicates, keep the only row
+        selected_rows.append(rows[0])
+    else:
+        # Duplicates found - manual selection
+        group_num += 1
+        print(f'\\n🔍 Duplicate Group {group_num} ({len(rows)} identical rows):')
+        print('=' * 60)
+        
+        for i, (row_data, line_num) in enumerate(rows):
+            print(f'\\n  {i+1}) ')
+            display_row(row_data, headers, line_num)
+        
+        print(f'\\n  {len(rows)+1}) Skip this group (keep first occurrence - line {rows[0][1]})')
+        
+        while True:
+            try:
+                choice = input(f'\\nSelect which row to keep (1-{len(rows)+1}): ').strip()
+                choice_num = int(choice)
+                
+                if 1 <= choice_num <= len(rows):
+                    selected_rows.append(rows[choice_num - 1])
+                    print(f'✓ Keeping row from line {rows[choice_num - 1][1]}')
+                    break
+                elif choice_num == len(rows) + 1:
+                    selected_rows.append(rows[0])  # Keep first
+                    print(f'✓ Keeping first occurrence (line {rows[0][1]})')
+                    break
+                else:
+                    print(f'❌ Invalid choice. Please enter a number between 1 and {len(rows)+1}.')
+            except (ValueError, KeyboardInterrupt):
+                print(f'❌ Invalid input. Please enter a number between 1 and {len(rows)+1}.')
+
+# Sort by original line number to maintain order
+selected_rows.sort(key=lambda x: x[1])
+final_rows = [row for row, line_num in selected_rows]
+
+# Write result
+write_csv_data('$output_file', final_rows, headers)
+
+removed_count = len(data) - len(final_rows)
+print(f'\\n✅ Manual deduplication completed!')
+print(f'   Created: $output_file')
+print(f'   Rows removed: {removed_count:,}')
+print(f'   Final count: {len(final_rows):,}')
+"
+}
+
+# Function to auto-deduplicate (keep first occurrence)
+auto_deduplication() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    python3 -c "
+import csv
+import sys
+from collections import defaultdict
+
+def read_csv_data(filename):
+    data = []
+    with open(filename, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+        
+        for row_num, row in enumerate(reader):
+            while len(row) < len(headers):
+                row.append('')
+            data.append((row, row_num))
+    
+    return data, headers
+
+def write_csv_data(filename, rows, headers):
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
+# Read the CSV file
+data, headers = read_csv_data('$input_file')
+
+# Track seen rows and keep first occurrence
+seen_rows = set()
+unique_rows = []
+removed_count = 0
+
+for row_data, row_num in data:
+    row_key = tuple(cell.strip() for cell in row_data)
+    
+    if row_key not in seen_rows:
+        seen_rows.add(row_key)
+        unique_rows.append(row_data)
+    else:
+        removed_count += 1
+
+# Write result
+write_csv_data('$output_file', unique_rows, headers)
+
+print(f'✅ Automatic deduplication completed!')
+print(f'   Created: $output_file')
+print(f'   Rows removed: {removed_count:,}')
+print(f'   Final count: {len(unique_rows):,}')
+"
+}
+
+# Main script
+main() {
+    # Find CSV files
+    echo "🔍 Scanning for CSV files in current directory..."
+    
+    csv_files=()
+    while IFS= read -r -d '' file; do
+        csv_files+=("$file")
+    done < <(find . -maxdepth 1 -name "*.csv" -type f -print0 | sort -z)
+    
+    local num_files=${#csv_files[@]}
+    
+    if [[ $num_files -eq 0 ]]; then
+        echo "❌ No CSV files found in current directory."
+        exit 1
+    elif [[ $num_files -eq 1 ]]; then
+        local input_file="${csv_files[0]}"
+        echo "📁 Found 1 CSV file: $input_file"
+    else
+        echo "📁 Found $num_files CSV files:"
+        printf '     %s\n' "${csv_files[@]}"
+        echo
+        echo "Please select which file to deduplicate:"
+        
+        for i in "${!csv_files[@]}"; do
+            echo "  $((i+1))) ${csv_files[$i]}"
+        done
+        
+        while true; do
+            read -p "Enter your choice (1-$num_files): " -r file_choice
+            if [[ "$file_choice" =~ ^[0-9]+$ ]] && [[ "$file_choice" -ge 1 ]] && [[ "$file_choice" -le "$num_files" ]]; then
+                local input_file="${csv_files[$((file_choice-1))]}"
+                break
+            else
+                echo "❌ Invalid choice. Please enter a number between 1 and $num_files."
+            fi
+        done
+    fi
+    
+    echo
+    echo "Selected file: $input_file"
+    
+    # Check if file is readable
+    if [[ ! -r "$input_file" ]]; then
+        echo "❌ Cannot read $input_file"
+        exit 1
+    fi
+    
+    # Get total row count
+    local total_rows=$(get_row_count "$input_file")
+    echo "Total data rows: $total_rows"
+    echo
+    
+    # Analyze duplicates
+    local analysis_output=$(analyze_exact_duplicates "$input_file")
+    local duplicate_count=$(echo "$analysis_output" | grep "RETURN_CODE:" | cut -d: -f2)
+    
+    # Display analysis results
+    echo "$analysis_output" | grep -v "RETURN_CODE:"
+    echo
+    
+    # If no duplicates found, exit
+    if [[ "$duplicate_count" -eq 0 ]]; then
+        echo "🎉 No deduplication needed - your file has no exact duplicates!"
+        exit 0
+    fi
+    
+    # Show deduplication summary and ask for confirmation
+    echo "⚠️  Found $duplicate_count duplicate rows to remove."
+    echo
+    echo "📊 DEDUPLICATION SUMMARY:"
+    echo "   • Original file: $input_file"
+    echo "   • Duplicate rows to remove: $duplicate_count"
+    echo "   • Final row count: $((total_rows - duplicate_count))"
+    echo "   • Your original file will remain unchanged"
+    echo "   • A new deduplicated file will be created"
+    echo
+    read -p "Do you want to proceed with deduplication? (y/N): " -r proceed_choice
+    echo
+    
+    if [[ ! "$proceed_choice" =~ ^[Yy]$ ]]; then
+        echo "❌ Deduplication cancelled by user."
+        exit 0
+    fi
+    
+    echo "Choose deduplication method:"
+    echo "  1) Automatic - keep first occurrence of each duplicate set"
+    echo "  2) Manual - review each duplicate set and choose which row to keep"
+    echo
+    
+    while true; do
+        read -p "Enter your choice (1-2): " -r method_choice
+        case $method_choice in
+            1)
+                local use_manual=false
+                break
+                ;;
+            2)
+                local use_manual=true
+                break
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 1 or 2."
+                ;;
+        esac
+    done
+    
+    # Generate output filename
+    local base_name=$(basename "$input_file" .csv)
+    local output_file="${base_name}_exact_deduplicated.csv"
+    
+    echo
+    echo "📝 Processing file..."
+    echo "   Input file: $input_file"
+    echo "   Output file: $output_file"
+    echo
+    
+    # Perform deduplication
+    if [[ "$use_manual" == true ]]; then
+        manual_deduplication "$input_file" "$output_file"
+    else
+        auto_deduplication "$input_file" "$output_file"
+    fi
+    
+    echo
+    echo "🎉 Exact deduplication completed successfully!"
+}
+
+# Run main function
+main "$@"
