@@ -78,6 +78,7 @@ preview_csv_extension() {
     local extend_file="$5"  # "file1" or "file2"
     local source_cols="$6"  # columns to add from source file
     local match_type="$7"   # "exact" or "substring"
+    local bidirectional="$8"  # "true" or "false" for substring matching
     
     python3 -c "
 import csv
@@ -113,8 +114,12 @@ def create_match_key(row, headers, col_indices):
             key_parts.append(value)
     return '|||'.join(key_parts)  # Use unlikely separator
 
-def check_substring_match(target_key, source_keys):
-    \"\"\"Check if target_key matches any source_key using substring logic\"\"\"
+def check_substring_match(target_key, source_keys, bidirectional=False):
+    \"\"\"Check if target_key matches any source_key using substring logic
+    
+    If bidirectional=False (default), target must be a substring of source
+    If bidirectional=True, either target is a substring of source OR source is a substring of target
+    \"\"\"
     target_parts = target_key.split('|||')
     
     for source_key in source_keys:
@@ -124,16 +129,24 @@ def check_substring_match(target_key, source_keys):
         if len(target_parts) != len(source_parts):
             continue
             
-        # Check if each target part is a substring of corresponding source part
+        # Check if each part matches according to substring rules
         match = True
         for t_part, s_part in zip(target_parts, source_parts):
             # Skip empty target parts (don't consider them a match)
             if not t_part.strip():
                 match = False
                 break
-            if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
-                match = False
-                break
+                
+            if bidirectional:
+                # Bidirectional: either t_part in s_part OR s_part in t_part
+                if (t_part.lower() not in s_part.lower()) and (s_part.lower() not in t_part.lower()):
+                    match = False
+                    break
+            else:
+                # Unidirectional: t_part must be in s_part
+                if t_part.lower() not in s_part.lower():
+                    match = False
+                    break
         
         if match:
             return source_key
@@ -145,6 +158,7 @@ match_cols1 = [int(x) - 1 for x in '$match_cols1'.split(',')]  # Convert to 0-ba
 match_cols2 = [int(x) - 1 for x in '$match_cols2'.split(',')]  # Convert to 0-based
 source_cols = [int(x) - 1 for x in '$source_cols'.split(',')]  # Convert to 0-based
 match_type = '$match_type'
+bidirectional = True if '$bidirectional' == 'true' else False  # Convert string to boolean
 
 # Read both files
 file1_data, file1_headers = read_csv_to_dict('$file1')
@@ -156,7 +170,13 @@ print(f'📊 PREVIEW - Match Analysis')
 print(f'═══════════════════════════')
 
 # Display match type
-match_type_display = 'Exact Match' if match_type == 'exact' else 'Substring Match (target ⊆ source)'
+if match_type == 'exact':
+    match_type_display = 'Exact Match'
+else:
+    if bidirectional:
+        match_type_display = 'Substring Match - Bidirectional (target ⊆ source OR source ⊆ target)'
+    else:
+        match_type_display = 'Substring Match - Unidirectional (target ⊆ source)'
 print(f'Match Type: {match_type_display}')
 print()
 
@@ -214,17 +234,28 @@ for row in source_data:
 # Analyze matches without creating the extended data
 matches_found = 0
 total_target_rows = len(target_data)
+non_empty_match_cols = 0
 
+print(\"Analyzing rows...\")
+
+# Process rows without progress bar
 for row in target_data:
     target_key = create_match_key(row, target_headers, target_match_cols)
+    
+    # Count non-empty match columns
+    if target_key.strip('|'):
+        non_empty_match_cols += 1
     
     if match_type == 'exact':
         # Skip empty keys (where all parts are empty)
         if target_key.strip('|') and target_key in source_lookup:
             matches_found += 1
     else:  # substring matching
-        if check_substring_match(target_key, source_keys):
+        if check_substring_match(target_key, source_keys, bidirectional):
             matches_found += 1
+
+print(f\"Analyzed {total_target_rows} rows.\")
+print()
 
 # Calculate statistics
 match_percentage = (matches_found / total_target_rows * 100) if total_target_rows > 0 else 0
@@ -233,6 +264,8 @@ no_match_count = total_target_rows - matches_found
 print(f'📈 MATCH STATISTICS')
 print(f'═══════════════════')
 print(f'Total rows in target file: {total_target_rows:,}')
+print(f'Rows with non-empty matching columns: {non_empty_match_cols:,} ({non_empty_match_cols/total_target_rows*100:.1f}%)')
+print(f'Rows with empty matching columns: {total_target_rows - non_empty_match_cols:,} ({(total_target_rows - non_empty_match_cols)/total_target_rows*100:.1f}%)')
 print(f'Rows with matches: {matches_found:,} ({match_percentage:.1f}%)')
 print(f'Rows without matches: {no_match_count:,} ({100-match_percentage:.1f}%)')
 print(f'Number of columns to be added: {len(source_cols)}')
@@ -262,6 +295,7 @@ extend_csv_files() {
     local extend_file="$5"  # "file1" or "file2"
     local source_cols="$6"  # columns to add from source file
     local match_type="$7"   # "exact" or "substring"
+    local bidirectional="$8"  # "true" or "false" for substring matching
     
     python3 -c "
 import csv
@@ -297,8 +331,12 @@ def create_match_key(row, headers, col_indices):
             key_parts.append(value)
     return '|||'.join(key_parts)  # Use unlikely separator
 
-def check_substring_match(target_key, source_keys):
-    \"\"\"Check if target_key matches any source_key using substring logic\"\"\"
+def check_substring_match(target_key, source_keys, bidirectional=False):
+    \"\"\"Check if target_key matches any source_key using substring logic
+    
+    If bidirectional=False (default), target must be a substring of source
+    If bidirectional=True, either target is a substring of source OR source is a substring of target
+    \"\"\"
     target_parts = target_key.split('|||')
     
     for source_key in source_keys:
@@ -308,16 +346,24 @@ def check_substring_match(target_key, source_keys):
         if len(target_parts) != len(source_parts):
             continue
             
-        # Check if each target part is a substring of corresponding source part
+        # Check if each part matches according to substring rules
         match = True
         for t_part, s_part in zip(target_parts, source_parts):
             # Skip empty target parts (don't consider them a match)
             if not t_part.strip():
                 match = False
                 break
-            if t_part.lower() not in s_part.lower():  # Case-insensitive substring check
-                match = False
-                break
+                
+            if bidirectional:
+                # Bidirectional: either t_part in s_part OR s_part in t_part
+                if (t_part.lower() not in s_part.lower()) and (s_part.lower() not in t_part.lower()):
+                    match = False
+                    break
+            else:
+                # Unidirectional: t_part must be in s_part
+                if t_part.lower() not in s_part.lower():
+                    match = False
+                    break
         
         if match:
             return source_key
@@ -335,6 +381,7 @@ match_cols1 = [int(x) - 1 for x in '$match_cols1'.split(',')]  # Convert to 0-ba
 match_cols2 = [int(x) - 1 for x in '$match_cols2'.split(',')]  # Convert to 0-based
 source_cols = [int(x) - 1 for x in '$source_cols'.split(',')]  # Convert to 0-based
 match_type = '$match_type'
+bidirectional = True if '$bidirectional' == 'true' else False  # Convert string to boolean
 
 # Read both files
 file1_data, file1_headers = read_csv_to_dict('$file1')
@@ -391,9 +438,17 @@ for col_idx in source_cols:
 # Extend target data
 extended_data = []
 matches_found = 0
+non_empty_match_cols = 0
+total_target_rows = len(target_data)
+
+print(\"Processing rows...\")
 
 for row in target_data:
     target_key = create_match_key(row, target_headers, target_match_cols)
+    
+    # Count non-empty match columns
+    if target_key.strip('|'):
+        non_empty_match_cols += 1
     
     # Create new row with existing data
     new_row = row.copy()
@@ -405,7 +460,7 @@ for row in target_data:
         if target_key.strip('|') and target_key in source_lookup:
             matched_source_key = target_key
     else:  # substring matching
-        matched_source_key = check_substring_match(target_key, source_keys)
+        matched_source_key = check_substring_match(target_key, source_keys, bidirectional)
     
     # Add new columns
     if matched_source_key:
@@ -420,6 +475,9 @@ for row in target_data:
     
     extended_data.append(new_row)
 
+print(f\"Processed {total_target_rows} rows.\")
+print()
+
 # Generate output filename
 target_basename = target_file_name.replace('.csv', '').replace('./', '')
 output_file = f'{target_basename}_extended.csv'
@@ -432,6 +490,10 @@ if len(new_column_names) == 1:
     print(f'  Final result: {len(extended_data):,} rows with 1 new column added')
 else:
     print(f'  Final result: {len(extended_data):,} rows with {len(new_column_names)} new columns added')
+
+# Print matching statistics
+print(f'  Rows with non-empty matching columns: {non_empty_match_cols:,} ({non_empty_match_cols/total_target_rows*100:.1f}%)')
+print(f'  Rows with matches found: {matches_found:,} ({matches_found/total_target_rows*100:.1f}%)')
     
 # Print each added column
 for _, col_name in new_column_names:
@@ -618,25 +680,35 @@ with open('$file2', 'r', encoding='utf-8') as f:
     # Choose match type
     echo "Choose matching type:"
     echo "  1) Exact match (values must be identical)"
-    echo "  2) Substring match (target value is contained in source value)"
+    echo "  2) Substring match - unidirectional (target value is contained in source value)"
     echo "     Example: 'Apple' matches 'Green Apple Inc'"
+    echo "  3) Substring match - bidirectional (either is substring of the other)"
+    echo "     Example: 'Apple' matches 'Green Apple Inc' AND 'Green Apple Inc' matches 'Apple'"
     echo
     
     while true; do
-        read -p "Enter your choice (1-2): " -r choice
+        read -p "Enter your choice (1-3): " -r choice
         case $choice in
             1)
                 match_type="exact"
+                bidirectional="false"
                 echo "Selected: Exact matching"
                 break
                 ;;
             2)
                 match_type="substring"
-                echo "Selected: Substring matching (target ⊆ source)"
+                bidirectional="false"
+                echo "Selected: Unidirectional substring matching (target ⊆ source)"
+                break
+                ;;
+            3)
+                match_type="substring"
+                bidirectional="true"
+                echo "Selected: Bidirectional substring matching (target ⊆ source OR source ⊆ target)"
                 break
                 ;;
             *)
-                echo "❌ Invalid choice. Please enter 1 or 2."
+                echo "❌ Invalid choice. Please enter 1, 2, or 3."
                 ;;
         esac
     done
@@ -647,9 +719,9 @@ with open('$file2', 'r', encoding='utf-8') as f:
     
     # First, show preview of what will happen
     if [[ "$extend_file" == "file1" ]]; then
-        preview_csv_extension "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type"
+        preview_csv_extension "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type" "$bidirectional"
     else
-        preview_csv_extension "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type"
+        preview_csv_extension "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type" "$bidirectional"
     fi
     
     # Ask for confirmation
@@ -677,9 +749,9 @@ with open('$file2', 'r', encoding='utf-8') as f:
     
     # Proceed with actual extension
     if [[ "$extend_file" == "file1" ]]; then
-        extend_csv_files "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type"
+        extend_csv_files "$file1" "$file2" "$target_match_cols" "$source_match_cols" "$extend_file" "$add_cols" "$match_type" "$bidirectional"
     else
-        extend_csv_files "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type"
+        extend_csv_files "$file1" "$file2" "$source_match_cols" "$target_match_cols" "$extend_file" "$add_cols" "$match_type" "$bidirectional"
     fi
     
     echo "🎉 CSV extension completed successfully!"
