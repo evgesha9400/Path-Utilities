@@ -17,11 +17,20 @@ get_columns() {
 import csv
 import sys
 
-with open('$1', 'r', encoding='utf-8') as f:
-    reader = csv.reader(f)
-    headers = next(reader)
-    for i, header in enumerate(headers):
-        print(f'{i+1:2d}) {header.strip()}')
+# Try different encodings
+for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+    try:
+        with open('$1', 'r', encoding=encoding) as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            for i, header in enumerate(headers):
+                print(f'{i+1:2d}) {header.strip()}')
+            break  # Successfully read the file
+    except UnicodeDecodeError:
+        if encoding == 'iso-8859-1':  # Last encoding attempt
+            print(f\"❌ Could not decode the file with any of the attempted encodings.\")
+            sys.exit(1)
+        continue  # Try next encoding
 "
 }
 
@@ -78,29 +87,39 @@ def read_csv_with_index_column(filename, match_col_idx):
     data = []
     match_values = set()
     
-    with open(filename, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        headers = next(reader)
-        
-        for row_num, row in enumerate(reader):
-            # Pad row if it has fewer columns than headers
-            while len(row) < len(headers):
-                row.append('')
-            
-            # Create row dict
-            row_dict = {}
-            for i, header in enumerate(headers):
-                row_dict[header.strip()] = row[i] if i < len(row) else ''
-            
-            data.append(row_dict)
-            
-            # Add match value to set (using 0-based indexing)
-            if match_col_idx < len(row):
-                match_val = row[match_col_idx].strip()
-                if match_val:  # Only add non-empty values
-                    match_values.add(match_val)
+    # Try different encodings
+    encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
     
-    return data, headers, match_values
+    for encoding in encodings:
+        try:
+            with open(filename, 'r', encoding=encoding) as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                
+                for row_num, row in enumerate(reader):
+                    # Pad row if it has fewer columns than headers
+                    while len(row) < len(headers):
+                        row.append('')
+                    
+                    # Create row dict
+                    row_dict = {}
+                    for i, header in enumerate(headers):
+                        row_dict[header.strip()] = row[i] if i < len(row) else ''
+                    
+                    data.append(row_dict)
+                    
+                    # Add match value to set (using 0-based indexing)
+                    if match_col_idx < len(row):
+                        match_val = row[match_col_idx].strip()
+                        if match_val:  # Only add non-empty values
+                            match_values.add(match_val)
+                
+                return data, headers, match_values
+        except UnicodeDecodeError:
+            if encoding == encodings[-1]:  # Last encoding attempt
+                print(f\"❌ Could not decode {filename} with any of the attempted encodings.\")
+                sys.exit(1)
+            continue  # Try next encoding
 
 def write_csv_from_dict_list(filename, data, fieldnames):
     with open(filename, 'w', encoding='utf-8', newline='') as f:
@@ -252,10 +271,19 @@ main() {
     # Get column selection for file 1
     local num_cols1=$(python3 -c "
 import csv
-with open('$file1', 'r', encoding='utf-8') as f:
-    reader = csv.reader(f)
-    headers = next(reader)
-    print(len(headers))
+# Try different encodings
+for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+    try:
+        with open('$file1', 'r', encoding=encoding) as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            print(len(headers))
+            break  # Successfully read the file
+    except UnicodeDecodeError:
+        if encoding == 'iso-8859-1':  # Last encoding attempt
+            print(f\"❌ Could not decode the file with any of the attempted encodings.\")
+            sys.exit(1)
+        continue  # Try next encoding
 ")
     
     while true; do
@@ -270,10 +298,19 @@ with open('$file1', 'r', encoding='utf-8') as f:
     # Get column selection for file 2
     local num_cols2=$(python3 -c "
 import csv
-with open('$file2', 'r', encoding='utf-8') as f:
-    reader = csv.reader(f)
-    headers = next(reader)
-    print(len(headers))
+# Try different encodings
+for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+    try:
+        with open('$file2', 'r', encoding=encoding) as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            print(len(headers))
+            break  # Successfully read the file
+    except UnicodeDecodeError:
+        if encoding == 'iso-8859-1':  # Last encoding attempt
+            print(f\"❌ Could not decode the file with any of the attempted encodings.\")
+            sys.exit(1)
+        continue  # Try next encoding
 ")
     
     while true; do

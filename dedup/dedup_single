@@ -357,15 +357,13 @@ main() {
         exit 1
     elif [[ $num_files -eq 1 ]]; then
         local input_file="${csv_files[0]}"
-        echo "📁 Found 1 CSV file: $input_file"
+        echo "📁 Found 1 CSV file: $(basename "$input_file" | sed 's|^\./||')"
     else
         echo "📁 Found $num_files CSV files:"
-        printf '     %s\n' "${csv_files[@]}"
-        echo
         echo "Please select which file to deduplicate:"
         
         for i in "${!csv_files[@]}"; do
-            echo "  $((i+1))) ${csv_files[$i]}"
+            echo "  $((i+1))) $(basename "${csv_files[$i]}" | sed 's|^\./||')"
         done
         
         while true; do
@@ -380,7 +378,7 @@ main() {
     fi
     
     echo
-    echo "Selected file: $input_file"
+    echo "Selected file: $(basename "$input_file" | sed 's|^\./||')"
     
     # Check if file is readable
     if [[ ! -r "$input_file" ]]; then
