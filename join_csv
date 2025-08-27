@@ -5,6 +5,9 @@
 
 set -e  # Exit on any error
 
+# Source the file selector component
+source "$(dirname "$0")/file_selector"
+
 # Function to get CSV header
 get_header() {
     head -n 1 "$1" | sed 's/\r$//'
@@ -73,116 +76,21 @@ else:
 "
 }
 
-# Function to display file selection menu
-select_files() {
-    local available_files=("$@")
-    local selected_files=()
-    local file_statuses=()
-    
-    # Initialize all files as unselected
-    for i in "${!available_files[@]}"; do
-        file_statuses[i]="false"
-    done
-    
-    while true; do
-        clear
-        echo "📁 CSV File Selection"
-        echo "=================================="
-        echo "Select files to join (minimum 2 required):"
-        echo
-        
-        # Display files with selection status
-        for i in "${!available_files[@]}"; do
-            local status="[ ]"
-            if [[ "${file_statuses[i]}" == "true" ]]; then
-                status="[✓]"
-            fi
-            printf "%2d) %s %s\n" $((i+1)) "$status" "$(basename "${available_files[i]}")"
-        done
-        
-        echo
-        echo "Commands:"
-        echo "  1-${#available_files[@]}: Toggle file selection"
-        echo "  a: Select all files"
-        echo "  c: Clear all selections"
-        echo "  d: Done (proceed with selected files)"
-        echo "  q: Quit"
-        echo
-        
-        # Count selected files
-        local selected_count=0
-        for status in "${file_statuses[@]}"; do
-            if [[ "$status" == "true" ]]; then
-                ((selected_count++))
-            fi
-        done
-        
-        echo "Selected files: $selected_count"
-        if [[ $selected_count -lt 2 ]]; then
-            echo "⚠️  Need at least 2 files to join"
-        fi
-        echo
-        
-        read -p "Enter choice: " -r choice
-        
-        case "$choice" in
-            [1-9]|[1-9][0-9]|[1-9][0-9][0-9])
-                if [[ $choice -ge 1 && $choice -le ${#available_files[@]} ]]; then
-                    local idx=$((choice-1))
-                    if [[ "${file_statuses[idx]}" == "true" ]]; then
-                        file_statuses[idx]="false"
-                    else
-                        file_statuses[idx]="true"
-                    fi
-                else
-                    echo "Invalid file number. Press Enter to continue..."
-                    read
-                fi
-                ;;
-            a|A)
-                for i in "${!file_statuses[@]}"; do
-                    file_statuses[i]="true"
-                done
-                ;;
-            c|C)
-                for i in "${!file_statuses[@]}"; do
-                    file_statuses[i]="false"
-                done
-                ;;
-            d|D)
-                if [[ $selected_count -lt 2 ]]; then
-                    echo "❌ Need at least 2 files to join. Press Enter to continue..."
-                    read
-                    continue
-                fi
-                
-                # Build selected files array
-                selected_files=()
-                for i in "${!available_files[@]}"; do
-                    if [[ "${file_statuses[i]}" == "true" ]]; then
-                        selected_files+=("${available_files[i]}")
-                    fi
-                done
-                break
-                ;;
-            q|Q)
-                echo "❌ Operation cancelled."
-                exit 1
-                ;;
-            *)
-                echo "Invalid choice. Press Enter to continue..."
-                read
-                ;;
-        esac
-    done
-    
-    # Return selected files via global variable
-    csv_files=("${selected_files[@]}")
-}
+# Note: The file selection functionality has been moved to the file_selector component
 
 # Function to count rows in a file
 count_rows() {
-    tail -n +2 "$1" | wc -l | tr -d ' '
+    # Count lines after header, handling files that may not end with newline
+    local line_count=$(tail -n +2 "$1" | wc -l | tr -d ' ')
+    
+    # Check if the last line doesn't end with a newline
+    if [[ -s "$1" ]] && [[ $(tail -c 1 "$1" | wc -l) -eq 0 ]]; then
+        # If the file doesn't end with a newline, add 1 to the count
+        echo $((line_count + 1))
+    else
+        # If the file ends with a newline, return the count as is
+        echo "$line_count"
+    fi
 }
 
 # Function to display join summary
@@ -232,11 +140,19 @@ main() {
         exit 1
     fi
     
-    # Let user select files to join
-    select_files "${all_csv_files[@]}"
+    # Let user select files to join using the file_selector component
+    select_files "CSV File Selection" 2 0 "*.csv" "."
+    if [[ $? -ne 0 ]]; then
+        exit 1
+    fi
+    
+    # Copy selected_files to csv_files for compatibility with the rest of the script
+    csv_files=("${selected_files[@]}")
     
     echo "📁 Selected ${#csv_files[@]} files for joining:"
-    printf '   %s\n' "${csv_files[@]}"
+    for file in "${csv_files[@]}"; do
+        printf '   %s\n' "$(basename "$file")"
+    done
     echo
     
     # Check if all files are readable and get their headers
@@ -251,7 +167,7 @@ main() {
     
     for file in "${csv_files[@]}"; do
         if [[ ! -r "$file" ]]; then
-            echo "⚠️  Warning: Cannot read $file, skipping..."
+            echo "⚠️  Warning: Cannot read $(basename "$file"), skipping..."
             continue
         fi
         
@@ -263,10 +179,10 @@ main() {
             reference_header="$current_header"
             reference_columns="$current_columns"
             all_files_valid+=("$file")
-            echo "   ✓ $file (reference)"
+            echo "   ✓ $(basename "$file") (reference)"
         else
             if [[ "$current_columns" != "$reference_columns" ]]; then
-                echo "   ❌ $file - Different columns!"
+                echo "   ❌ $(basename "$file") - Different columns!"
                 echo "      Reference: $reference_header"
                 echo "      This file: $current_header"
                 echo "      Reference columns (sorted): $reference_columns"
@@ -277,10 +193,10 @@ main() {
             elif [[ "$current_header" != "$reference_header" ]]; then
                 headers_identical=false
                 different_order_files+=("$file")
-                echo "   ⚠️  $file - Same columns, different order"
+                echo "   ⚠️  $(basename "$file") - Same columns, different order"
                 all_files_valid+=("$file")
             else
-                echo "   ✓ $file (identical header)"
+                echo "   ✓ $(basename "$file") (identical header)"
                 all_files_valid+=("$file")
             fi
         fi
@@ -322,12 +238,15 @@ main() {
         # Write header from reference file
         echo "$reference_header" > "$output_file"
         
-        # Append data from all files (skip header)
+                        # Append data from all files (skip header)
         local total_rows=0
         for file in "${all_files_valid[@]}"; do
-            local rows=$(tail -n +2 "$file" | wc -l | tr -d ' ')
+            local rows=$(count_rows "$file")
             if [[ $rows -gt 0 ]]; then
-                tail -n +2 "$file" >> "$output_file"
+                # Ensure each line ends with a newline
+                tail -n +2 "$file" | while IFS= read -r line || [[ -n "$line" ]]; do
+                    echo "$line" >> "$output_file"
+                done
                 total_rows=$((total_rows + rows))
                 echo "   ✓ Added $rows rows from $(basename "$file")"
             else
@@ -439,15 +358,18 @@ main() {
             
             if [[ "$file_header" == "$chosen_header" ]]; then
                 # Same order, just append data
-                local rows=$(tail -n +2 "$file" | wc -l | tr -d ' ')
+                local rows=$(count_rows "$file")
                 if [[ $rows -gt 0 ]]; then
-                    tail -n +2 "$file" >> "$output_file"
+                    # Ensure each line ends with a newline
+                    tail -n +2 "$file" | while IFS= read -r line || [[ -n "$line" ]]; do
+                        echo "$line" >> "$output_file"
+                    done
                     total_rows=$((total_rows + rows))
                     echo "   ✓ Added $rows rows from $(basename "$file") (same order)"
                 fi
             else
                 # Need to reorder columns using Python
-                local rows=$(python3 -c "
+                python3 -c "
 import csv
 import sys
 
@@ -457,13 +379,44 @@ try:
         rows = list(reader)
     
     chosen_cols = '$chosen_header'.split(',')
+    chosen_cols = [col.strip() for col in chosen_cols]
+    
+    count = 0
     for row in rows:
-        reordered = [row.get(col.strip(), '') for col in chosen_cols]
-        print(','.join(['\"' + str(cell).replace('\"', '\"\"') + '\"' for cell in reordered]))
+        # Get values for each column, preserving the original CSV format
+        reordered = []
+        for col in chosen_cols:
+            val = row.get(col, '')
+            # Only add quotes if needed (if value contains comma, newline, or quote)
+            if ',' in val or '\n' in val or '"' in val:
+                val = '"' + val.replace('"', '""') + '"'
+            reordered.append(val)
+        print(','.join(reordered))
+        count += 1
+    sys.exit(count)
 except Exception as e:
     print(f'Error processing file: {e}', file=sys.stderr)
     sys.exit(1)
-" | tee -a "$output_file" | wc -l | tr -d ' ')
+" > /tmp/reordered_rows.txt
+                
+                local exit_code=$?
+                if [[ $exit_code -gt 0 ]]; then
+                    # The exit code is the number of rows processed
+                    local rows=$exit_code
+                    
+                    # Append the reordered rows to the output file
+                    cat /tmp/reordered_rows.txt | while IFS= read -r line || [[ -n "$line" ]]; do
+                        echo "$line" >> "$output_file"
+                    done
+                    
+                    rm -f /tmp/reordered_rows.txt
+                    total_rows=$((total_rows + rows))
+                    echo "   ✓ Added $rows rows from $(basename "$file") (reordered columns)"
+                else
+                    echo "   ⚠️  Error processing $(basename "$file")"
+                    cat /tmp/reordered_rows.txt >&2
+                    rm -f /tmp/reordered_rows.txt
+                fi
                 
                 total_rows=$((total_rows + rows))
                 echo "   ✓ Added $rows rows from $(basename "$file") (reordered columns)"

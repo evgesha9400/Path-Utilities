@@ -5,6 +5,9 @@
 
 set -e  # Exit on any error
 
+# Source the file selector component
+source "$(dirname "$0")/file_selector"
+
 # Function to get CSV header
 get_header() {
     head -n 1 "$1"
@@ -61,114 +64,7 @@ count_rows() {
     tail -n +2 "$1" | wc -l | tr -d ' '
 }
 
-# Function to display file selection menu
-select_files() {
-    local available_files=("$@")
-    local selected_files=()
-    local file_statuses=()
-    
-    # Initialize all files as unselected
-    for i in "${!available_files[@]}"; do
-        file_statuses[i]="false"
-    done
-    
-    while true; do
-        clear
-        echo "📁 CSV File Selection"
-        echo "=================================="
-        echo "Select two CSV files by entering their numbers separated by a comma (e.g., 1,3):"
-        echo
-        
-        # Display files with selection status
-        for i in "${!available_files[@]}"; do
-            local status="[ ]"
-            if [[ "${file_statuses[i]}" == "true" ]]; then
-                status="[✓]"
-            fi
-            printf "%2d) %s %s\n" $((i+1)) "$status" "$(basename "${available_files[i]}" | sed 's|^\./||')"
-        done
-        
-        echo
-        echo "Commands:"
-        echo "  Enter two numbers separated by comma (e.g., 1,3)"
-        echo "  q: Quit"
-        echo
-        
-        # Count selected files
-        local selected_count=0
-        for status in "${file_statuses[@]}"; do
-            if [[ "$status" == "true" ]]; then
-                ((selected_count++))
-            fi
-        done
-        
-        echo "Selected files: $selected_count / 2"
-        echo
-        
-        read -p "Enter choice: " -r choice
-        
-        if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-            echo "❌ Operation cancelled."
-            exit 1
-        fi
-        
-        # Parse comma-separated input
-        if [[ "$choice" =~ ^[0-9]+,[0-9]+$ ]]; then
-            # Reset all selections
-            for i in "${!file_statuses[@]}"; do
-                file_statuses[i]="false"
-            done
-            
-            # Parse the two numbers
-            local first_choice=$(echo "$choice" | cut -d',' -f1)
-            local second_choice=$(echo "$choice" | cut -d',' -f2)
-            
-            # Validate and set selections
-            if [[ $first_choice -ge 1 && $first_choice -le ${#available_files[@]} ]]; then
-                file_statuses[$((first_choice-1))]="true"
-            else
-                echo "❌ Invalid first file number. Press Enter to continue..."
-                read
-                continue
-            fi
-            
-            if [[ $second_choice -ge 1 && $second_choice -le ${#available_files[@]} ]]; then
-                file_statuses[$((second_choice-1))]="true"
-            else
-                echo "❌ Invalid second file number. Press Enter to continue..."
-                read
-                continue
-            fi
-            
-            # Check if two different files were selected
-            if [[ $first_choice -eq $second_choice ]]; then
-                echo "❌ You must select two different files. Press Enter to continue..."
-                read
-                # Reset the selection
-                file_statuses[$((first_choice-1))]="false"
-                continue
-            fi
-            
-            # Build selected files array
-            selected_files=()
-            for i in "${!available_files[@]}"; do
-                if [[ "${file_statuses[i]}" == "true" ]]; then
-                    selected_files+=("${available_files[i]}")
-                fi
-            done
-            
-            if [[ ${#selected_files[@]} -eq 2 ]]; then
-                break
-            fi
-        else
-            echo "❌ Invalid input. Please enter two numbers separated by a comma. Press Enter to continue..."
-            read
-        fi
-    done
-    
-    # Return selected files via global variable
-    csv_files=("${selected_files[@]}")
-}
+# Note: The file selection functionality has been moved to the file_selector component
 
 # Function to fill CSV data based on matching columns
 fill_csv_data() {
@@ -327,8 +223,14 @@ main() {
         exit 1
     fi
     
-    # Let user select files
-    select_files "${all_csv_files[@]}"
+    # Let user select files using the file_selector component
+    select_files "CSV File Selection" 2 2 "*.csv" "."
+    if [[ $? -ne 0 ]]; then
+        exit 1
+    fi
+    
+    # Copy selected_files to csv_files for compatibility with the rest of the script
+    csv_files=("${selected_files[@]}")
     
     echo "📁 Selected ${#csv_files[@]} files:"
     for file in "${csv_files[@]}"; do

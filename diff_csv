@@ -5,330 +5,221 @@
 
 set -e  # Exit on any error
 
+# Source the file selector component
+source "$(dirname "$0")/file_selector"
+
 # Function to get CSV header
 get_header() {
     head -n 1 "$1"
 }
 
-# Function to find longest common substring
-longest_common_substring() {
-    python3 -c "
-import sys
-s1, s2 = '$1', '$2'
-
-# Remove file extensions for comparison
-s1 = s1.replace('.csv', '')
-s2 = s2.replace('.csv', '')
-
-max_len = 0
-result = ''
-
-for i in range(len(s1)):
-    for j in range(i + 1, len(s1) + 1):
-        substr = s1[i:j]
-        if substr in s2 and len(substr) > max_len:
-            max_len = len(substr)
-            result = substr
-
-# Clean up the result - remove trailing numbers, underscores, hyphens
-import re
-result = re.sub(r'[_\-\s]*[0-9]+[_\-\s]*$', '', result)
-result = result.strip('_- ')
-
-if result and len(result) >= 3:  # Only use if meaningful length
-    print(result)
-else:
-    # Fallback to first part of first filename
-    first_part = s1.split('_')[0].split('-')[0].split(' ')[0]
-    print(first_part if first_part else 'comparison')
-"
+# Function to normalize column names for comparison
+normalize_columns() {
+    echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort | paste -sd ','
 }
 
-# Function to compare CSV files and find differences
-compare_csv_files() {
-    local file1="$1"
-    local file2="$2"
-    local diff_type="$3"  # "column" or "row"
-    local output_type="$4"  # "difference" or "without_difference"
-    local base_name="$5"
+# Function to count rows in a file
+count_rows() {
+    # Count lines after header, handling files that may not end with newline
+    local line_count=$(tail -n +2 "$1" | wc -l | tr -d ' ')
     
+    # Check if the last line doesn't end with a newline
+    if [[ -s "$1" ]] && [[ $(tail -c 1 "$1" | wc -l) -eq 0 ]]; then
+        # If the file doesn't end with a newline, add 1 to the count
+        echo $((line_count + 1))
+    else
+        # If the file ends with a newline, return the count as is
+        echo "$line_count"
+    fi
+}
+
+# Function to display a progress bar
+show_progress() {
+    local current=$1
+    local total=$2
+    local width=50
+    local percentage=$((current * 100 / total))
+    local completed=$((width * current / total))
+    local remaining=$((width - completed))
+    
+    printf "\r[%s%s] %d%%" "$(printf "%${completed}s" | tr ' ' '#')" "$(printf "%${remaining}s" | tr ' ' '.')" "$percentage"
+}
+
+# Function to find common columns between two headers
+find_common_columns() {
     python3 -c "
+import sys
 import csv
-import sys
-from collections import OrderedDict
+import io
 
-def read_csv_as_dict_list(filename):
-    with open(filename, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        return [dict(row) for row in reader], reader.fieldnames
+header1 = '$1'.split(',')
+header2 = '$2'.split(',')
 
-def write_csv_from_dict_list(filename, data, fieldnames):
-    with open(filename, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data)
+# Strip whitespace from column names
+header1 = [col.strip() for col in header1]
+header2 = [col.strip() for col in header2]
 
-# Read both files
-file1_data, file1_headers = read_csv_as_dict_list('$file1')
-file2_data, file2_headers = read_csv_as_dict_list('$file2')
+# Find common columns
+common_cols = []
+for col in header1:
+    if col in header2:
+        common_cols.append(col)
 
-diff_type = '$diff_type'
-output_type = '$output_type'
-base_name = '$base_name'
-
-if diff_type == 'column':
-    # Column-based comparison
-    if output_type == 'difference':
-        # Find columns that exist in one file but not the other
-        headers1_set = set(file1_headers)
-        headers2_set = set(file2_headers)
-        
-        unique_to_file1 = headers1_set - headers2_set
-        unique_to_file2 = headers2_set - headers1_set
-        
-        if unique_to_file1 or unique_to_file2:
-            # Create output with different columns
-            all_unique_headers = list(unique_to_file1) + list(unique_to_file2)
-            
-            # Combine data from both files for unique columns
-            output_data = []
-            
-            # Add data from file1 for its unique columns
-            for i, row in enumerate(file1_data):
-                new_row = {'source_file': '$file1', 'row_number': i+1}
-                for col in unique_to_file1:
-                    new_row[col] = row.get(col, '')
-                if unique_to_file1:
-                    output_data.append(new_row)
-            
-            # Add data from file2 for its unique columns  
-            for i, row in enumerate(file2_data):
-                new_row = {'source_file': '$file2', 'row_number': i+1}
-                for col in unique_to_file2:
-                    new_row[col] = row.get(col, '')
-                if unique_to_file2:
-                    output_data.append(new_row)
-            
-            output_headers = ['source_file', 'row_number'] + all_unique_headers
-            output_file = base_name + '_column_difference.csv'
-            
-            write_csv_from_dict_list(output_file, output_data, output_headers)
-            print(f'✓ Created {output_file} with {len(all_unique_headers)} different columns')
-        else:
-            print('No column differences found between files.')
-            sys.exit(0)
-    
-    else:  # without_difference
-        # Keep only columns that exist in both files
-        common_headers = list(set(file1_headers) & set(file2_headers))
-        common_headers.sort(key=lambda x: file1_headers.index(x))  # Maintain original order
-        
-        if common_headers:
-            # Create combined data with only common columns
-            output_data = []
-            
-            # Add file1 data
-            for row in file1_data:
-                new_row = {}
-                for col in common_headers:
-                    new_row[col] = row.get(col, '')
-                output_data.append(new_row)
-            
-            # Add file2 data
-            for row in file2_data:
-                new_row = {}
-                for col in common_headers:
-                    new_row[col] = row.get(col, '')
-                output_data.append(new_row)
-            
-            output_file = base_name + '_without_column_difference.csv'
-            write_csv_from_dict_list(output_file, output_data, common_headers)
-            print(f'✓ Created {output_file} with {len(common_headers)} common columns and {len(output_data)} rows')
-        else:
-            print('No common columns found between files.')
-            sys.exit(1)
-
-else:  # row-based comparison
-    if output_type == 'difference':
-        # Find rows that are different between files
-        file1_rows_set = set()
-        file2_rows_set = set()
-        
-        # Convert rows to tuples for comparison
-        for row in file1_data:
-            row_tuple = tuple(sorted(row.items()))
-            file1_rows_set.add(row_tuple)
-        
-        for row in file2_data:
-            row_tuple = tuple(sorted(row.items()))
-            file2_rows_set.add(row_tuple)
-        
-        unique_to_file1 = file1_rows_set - file2_rows_set
-        unique_to_file2 = file2_rows_set - file1_rows_set
-        
-        if unique_to_file1 or unique_to_file2:
-            output_data = []
-            
-            # Add unique rows from file1
-            for row_tuple in unique_to_file1:
-                row_dict = dict(row_tuple)
-                row_dict['source_file'] = '$file1'
-                output_data.append(row_dict)
-            
-            # Add unique rows from file2
-            for row_tuple in unique_to_file2:
-                row_dict = dict(row_tuple)
-                row_dict['source_file'] = '$file2'
-                output_data.append(row_dict)
-            
-            output_headers = ['source_file'] + file1_headers
-            output_file = base_name + '_row_difference.csv'
-            
-            write_csv_from_dict_list(output_file, output_data, output_headers)
-            print(f'✓ Created {output_file} with {len(output_data)} different rows')
-        else:
-            print('No row differences found between files.')
-            sys.exit(0)
-    
-    else:  # without_difference
-        # Keep only rows that exist in both files
-        file1_rows_set = set()
-        file2_rows_set = set()
-        
-        # Convert rows to tuples for comparison
-        for row in file1_data:
-            row_tuple = tuple(sorted(row.items()))
-            file1_rows_set.add(row_tuple)
-        
-        for row in file2_data:
-            row_tuple = tuple(sorted(row.items()))
-            file2_rows_set.add(row_tuple)
-        
-        common_rows = file1_rows_set & file2_rows_set
-        
-        if common_rows:
-            output_data = []
-            for row_tuple in common_rows:
-                row_dict = dict(row_tuple)
-                output_data.append(row_dict)
-            
-            output_file = base_name + '_without_row_difference.csv'
-            write_csv_from_dict_list(output_file, output_data, file1_headers)
-            print(f'✓ Created {output_file} with {len(output_data)} common rows')
-        else:
-            print('No common rows found between files.')
-            sys.exit(0)
+# Print common columns as CSV
+if common_cols:
+    print(','.join(common_cols))
+else:
+    print('')
 "
 }
 
-# Function to display file selection menu
-select_files() {
-    local available_files=("$@")
-    local selected_files=()
-    local file_statuses=()
-    
-    # Initialize all files as unselected
-    for i in "${!available_files[@]}"; do
-        file_statuses[i]="false"
-    done
-    
-    while true; do
-        clear
-        echo "📁 CSV File Selection"
-        echo "=================================="
-        echo "Select two CSV files by entering their numbers separated by a comma (e.g., 1,3):"
-        echo
-        
-        # Display files with selection status
-        for i in "${!available_files[@]}"; do
-            local status="[ ]"
-            if [[ "${file_statuses[i]}" == "true" ]]; then
-                status="[✓]"
-            fi
-            printf "%2d) %s %s\n" $((i+1)) "$status" "$(basename "${available_files[i]}" | sed 's|^\./||')"
-        done
-        
-        echo
-        echo "Commands:"
-        echo "  Enter two numbers separated by comma (e.g., 1,3)"
-        echo "  q: Quit"
-        echo
-        
-        # Count selected files
-        local selected_count=0
-        for status in "${file_statuses[@]}"; do
-            if [[ "$status" == "true" ]]; then
-                ((selected_count++))
-            fi
-        done
-        
-        echo "Selected files: $selected_count / 2"
-        echo
-        
-        read -p "Enter choice: " -r choice
-        
-        if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-            echo "❌ Operation cancelled."
-            exit 1
-        fi
-        
-        # Parse comma-separated input
-        if [[ "$choice" =~ ^[0-9]+,[0-9]+$ ]]; then
-            # Reset all selections
-            for i in "${!file_statuses[@]}"; do
-                file_statuses[i]="false"
-            done
-            
-            # Parse the two numbers
-            local first_choice=$(echo "$choice" | cut -d',' -f1)
-            local second_choice=$(echo "$choice" | cut -d',' -f2)
-            
-            # Validate and set selections
-            if [[ $first_choice -ge 1 && $first_choice -le ${#available_files[@]} ]]; then
-                file_statuses[$((first_choice-1))]="true"
-            else
-                echo "❌ Invalid first file number. Press Enter to continue..."
-                read
-                continue
-            fi
-            
-            if [[ $second_choice -ge 1 && $second_choice -le ${#available_files[@]} ]]; then
-                file_statuses[$((second_choice-1))]="true"
-            else
-                echo "❌ Invalid second file number. Press Enter to continue..."
-                read
-                continue
-            fi
-            
-            # Check if two different files were selected
-            if [[ $first_choice -eq $second_choice ]]; then
-                echo "❌ You must select two different files. Press Enter to continue..."
-                read
-                # Reset the selection
-                file_statuses[$((first_choice-1))]="false"
-                continue
-            fi
-            
-            # Build selected files array
-            selected_files=()
-            for i in "${!available_files[@]}"; do
-                if [[ "${file_statuses[i]}" == "true" ]]; then
-                    selected_files+=("${available_files[i]}")
-                fi
-            done
-            
-            if [[ ${#selected_files[@]} -eq 2 ]]; then
-                break
-            fi
-        else
-            echo "❌ Invalid input. Please enter two numbers separated by a comma. Press Enter to continue..."
-            read
-        fi
-    done
-    
-    # Return selected files via global variable
-    csv_files=("${selected_files[@]}")
+# Function to find columns that exist in first header but not in second
+find_unique_columns() {
+    python3 -c "
+import sys
+import csv
+import io
+
+header1 = '$1'.split(',')
+header2 = '$2'.split(',')
+
+# Strip whitespace from column names
+header1 = [col.strip() for col in header1]
+header2 = [col.strip() for col in header2]
+
+# Find unique columns in header1
+unique_cols = []
+for col in header1:
+    if col not in header2:
+        unique_cols.append(col)
+
+# Print unique columns as CSV
+if unique_cols:
+    print(','.join(unique_cols))
+else:
+    print('')
+"
 }
+
+# Function to compare two CSV files based on common columns
+compare_csv() {
+    python3 -c "
+import sys
+import csv
+import io
+import os
+
+file1 = '$1'
+file2 = '$2'
+common_cols = '$3'.split(',')
+mode = '$4'
+output_file = '$5'
+
+# Strip whitespace from column names
+common_cols = [col.strip() for col in common_cols]
+
+# Function to create a key from a row based on common columns
+def make_key(row, cols):
+    return '|'.join([str(row.get(col, '')) for col in cols])
+
+# Read the first file
+rows1 = {}
+with open(file1, 'r') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        key = make_key(row, common_cols)
+        rows1[key] = row
+
+# Read the second file
+rows2 = {}
+with open(file2, 'r') as f:
+    reader = csv.DictReader(f)
+    fieldnames = reader.fieldnames
+    for row in reader:
+        key = make_key(row, common_cols)
+        rows2[key] = row
+
+# Find common and unique keys
+keys1 = set(rows1.keys())
+keys2 = set(rows2.keys())
+common_keys = keys1.intersection(keys2)
+only_in_file1 = keys1 - keys2
+only_in_file2 = keys2 - keys1
+
+# Get all fieldnames from both files
+all_fieldnames = set()
+with open(file1, 'r') as f:
+    reader = csv.DictReader(f)
+    for field in reader.fieldnames:
+        all_fieldnames.add(field)
+
+with open(file2, 'r') as f:
+    reader = csv.DictReader(f)
+    for field in reader.fieldnames:
+        all_fieldnames.add(field)
+
+all_fieldnames = list(all_fieldnames)
+
+# Process based on mode
+if mode == 'diff':
+    # Rows in file1 but not in file2
+    with open(output_file, 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=all_fieldnames)
+        writer.writeheader()
+        for key in only_in_file1:
+            writer.writerow(rows1[key])
+    
+    print(f'{len(only_in_file1)} rows in {os.path.basename(file1)} but not in {os.path.basename(file2)}')
+    
+elif mode == 'common':
+    # Rows in both files
+    with open(output_file, 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=all_fieldnames)
+        writer.writeheader()
+        for key in common_keys:
+            # Merge the rows from both files
+            merged_row = {}
+            for field in all_fieldnames:
+                if field in rows1[key]:
+                    merged_row[field] = rows1[key][field]
+                elif field in rows2[key]:
+                    merged_row[field] = rows2[key][field]
+                else:
+                    merged_row[field] = ''
+            writer.writerow(merged_row)
+    
+    print(f'{len(common_keys)} rows common to both files')
+    
+elif mode == 'unique':
+    # Rows unique to each file
+    with open(output_file, 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=all_fieldnames)
+        writer.writeheader()
+        for key in only_in_file1:
+            writer.writerow(rows1[key])
+        for key in only_in_file2:
+            writer.writerow(rows2[key])
+    
+    print(f'{len(only_in_file1)} rows only in {os.path.basename(file1)}')
+    print(f'{len(only_in_file2)} rows only in {os.path.basename(file2)}')
+    print(f'Total: {len(only_in_file1) + len(only_in_file2)} unique rows')
+    
+elif mode == 'file2_only':
+    # Rows in file2 but not in file1
+    with open(output_file, 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=all_fieldnames)
+        writer.writeheader()
+        for key in only_in_file2:
+            writer.writerow(rows2[key])
+    
+    print(f'{len(only_in_file2)} rows in {os.path.basename(file2)} but not in {os.path.basename(file1)}')
+
+# Return success
+sys.exit(0)
+"
+}
+
+# Note: The file selection functionality has been moved to the file_selector component
 
 # Main script
 main() {
@@ -350,8 +241,14 @@ main() {
         exit 1
     fi
     
-    # Let user select files
-    select_files "${all_csv_files[@]}"
+    # Let user select files using the file_selector component
+    select_files "CSV File Selection" 2 2 "*.csv" "."
+    if [[ $? -ne 0 ]]; then
+        exit 1
+    fi
+    
+    # Copy selected_files to csv_files for compatibility with the rest of the script
+    csv_files=("${selected_files[@]}")
     
     local file1="${csv_files[0]}"
     local file2="${csv_files[1]}"
@@ -377,84 +274,103 @@ main() {
     local header1=$(get_header "$file1")
     local header2=$(get_header "$file2")
     
-    echo "🔍 Checking headers..."
-    echo "   File 1 header: $header1"
-    echo "   File 2 header: $header2"
+    echo "🔍 Analyzing CSV files..."
+    echo "   File 1: $(basename "$file1")"
+    echo "   File 2: $(basename "$file2")"
     echo
     
-    if [[ "$header1" != "$header2" ]]; then
-        echo "❌ Headers are not identical!"
-        echo "   The CSV files must have the same column names in the same order."
-        echo "   Please ensure both files have identical headers before running this script."
+    # Find common columns
+    local common_columns=$(find_common_columns "$header1" "$header2")
+    if [[ -z "$common_columns" ]]; then
+        echo "❌ No common columns found between the files."
         exit 1
     fi
     
-    echo "✅ Headers are identical. Proceeding with comparison..."
+    # Find unique columns in each file
+    local unique_to_file1=$(find_unique_columns "$header1" "$header2")
+    local unique_to_file2=$(find_unique_columns "$header2" "$header1")
+    
+    echo "📊 Column Analysis:"
+    echo "   Common columns: $(echo "$common_columns" | tr ',' ', ')"
     echo
     
-    # Prompt for comparison type
-    echo "Choose comparison type:"
-    echo "  1) Column differences (compare which columns are unique to each file)"
-    echo "  2) Row differences (compare which rows are unique to each file)"
+    if [[ -n "$unique_to_file1" ]]; then
+        echo "   Columns only in $(basename "$file1"): $(echo "$unique_to_file1" | tr ',' ', ')"
+    fi
+    
+    if [[ -n "$unique_to_file2" ]]; then
+        echo "   Columns only in $(basename "$file2"): $(echo "$unique_to_file2" | tr ',' ', ')"
+    fi
     echo
     
-    while true; do
-        read -p "Enter your choice (1-2): " -r choice
-        case $choice in
-            1)
-                diff_type="column"
-                break
-                ;;
-            2)
-                diff_type="row"
-                break
-                ;;
-            *)
-                echo "❌ Invalid choice. Please enter 1 or 2."
-                ;;
-        esac
-    done
+    # Count rows in each file
+    local rows1=$(count_rows "$file1")
+    local rows2=$(count_rows "$file2")
     
+    echo "📝 Row counts:"
+    echo "   $(basename "$file1"): $rows1 data rows"
+    echo "   $(basename "$file2"): $rows2 data rows"
     echo
     
-    # Prompt for output type
-    echo "Choose output type:"
-    echo "  1) Show differences (export only the different ${diff_type}s)"
-    echo "  2) Show without differences (export only the common ${diff_type}s)"
+    # Ask user for comparison mode
+    echo "Select comparison mode:"
+    echo "1) Find rows in file 1 that are NOT in file 2"
+    echo "2) Find rows in file 2 that are NOT in file 1"
+    echo "3) Find rows that exist in BOTH files"
+    echo "4) Find rows that are UNIQUE to each file"
     echo
     
-    while true; do
-        read -p "Enter your choice (1-2): " -r choice
-        case $choice in
-            1)
-                output_type="difference"
-                break
-                ;;
-            2)
-                output_type="without_difference"
-                break
-                ;;
-            *)
-                echo "❌ Invalid choice. Please enter 1 or 2."
-                ;;
-        esac
-    done
-    
+    read -p "Enter choice (1-4): " -r mode_choice
     echo
     
-    # Generate base name for output file
-    local base_name=$(longest_common_substring "$file1" "$file2")
+    local mode=""
+    local output_file=""
+    local base_name1=$(basename "$file1" .csv)
+    local base_name2=$(basename "$file2" .csv)
     
-    echo "📝 Processing files..."
-    echo "   Comparison type: $diff_type"
-    echo "   Output type: $output_type"
-    echo "   Base name: $base_name"
+    case "$mode_choice" in
+        1)
+            mode="diff"
+            output_file="${base_name1}_not_in_${base_name2}.csv"
+            ;;
+        2)
+            mode="file2_only"
+            output_file="${base_name2}_not_in_${base_name1}.csv"
+            ;;
+        3)
+            mode="common"
+            output_file="${base_name1}_and_${base_name2}_common.csv"
+            ;;
+        4)
+            mode="unique"
+            output_file="${base_name1}_and_${base_name2}_unique.csv"
+            ;;
+        *)
+            echo "❌ Invalid choice."
+            exit 1
+            ;;
+    esac
+    
+    # Check if output file exists
+    if [[ -e "$output_file" ]]; then
+        read -p "⚠️  Output file '$output_file' already exists. Overwrite? (y/N): " -r confirm
+        echo
+        if [[ ! $confirm =~ ^[Yy]$ ]]; then
+            echo "❌ Operation cancelled."
+            exit 1
+        fi
+    fi
+    
+    echo "🔍 Comparing files based on common columns..."
+    echo "   Using columns: $(echo "$common_columns" | tr ',' ', ')"
+    echo "   Output file: $output_file"
     echo
     
     # Perform the comparison
-    compare_csv_files "$file1" "$file2" "$diff_type" "$output_type" "$base_name"
+    compare_csv "$file1" "$file2" "$common_columns" "$mode" "$output_file"
     
-    echo "🎉 Comparison completed successfully!"
+    echo
+    echo "✅ Comparison complete! Results saved to $output_file"
 }
 
 # Run main function
