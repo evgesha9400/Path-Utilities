@@ -15,7 +15,7 @@ get_header() {
 
 # Function to normalize column names for comparison
 normalize_columns() {
-    echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort | paste -sd ','
+    echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort | paste -sd ',' -
 }
 
 # Function to find longest common substring of all filenames
@@ -388,8 +388,8 @@ try:
         for col in chosen_cols:
             val = row.get(col, '')
             # Only add quotes if needed (if value contains comma, newline, or quote)
-            if ',' in val or '\n' in val or '"' in val:
-                val = '"' + val.replace('"', '""') + '"'
+            if ',' in val or '\\n' in val or '\"' in val:
+                val = '\"' + val.replace('\"', '\"\"') + '\"'
             reordered.append(val)
         print(','.join(reordered))
         count += 1
@@ -417,9 +417,6 @@ except Exception as e:
                     cat /tmp/reordered_rows.txt >&2
                     rm -f /tmp/reordered_rows.txt
                 fi
-                
-                total_rows=$((total_rows + rows))
-                echo "   ✓ Added $rows rows from $(basename "$file") (reordered columns)"
             fi
         done
         
