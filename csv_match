@@ -75,18 +75,29 @@ else:
 match_csv_files() {
     local file1="$1"
     local file2="$2"
-    local col1_idx="$3"
-    local col2_idx="$4"
+    local col1_indices="$3"  # comma-separated list of column indices
+    local col2_indices="$4"  # comma-separated list of column indices
     local output_type="$5"  # "matching" or "non_matching"
     local export_from="$6"  # "file1" or "file2"
     local base_name="$7"
+    local show_summary="$8"  # "true" or "false"
     
     python3 -c "
 import csv
 import sys
 from collections import OrderedDict
 
-def read_csv_with_index_column(filename, match_col_idx):
+def parse_column_indices(indices_str):
+    \"\"\"Parse comma-separated column indices and convert to 0-based list\"\"\"
+    indices = []
+    for idx in indices_str.split(','):
+        idx = idx.strip()
+        if idx.isdigit():
+            indices.append(int(idx) - 1)  # Convert to 0-based
+    return indices
+
+def read_csv_with_multi_columns(filename, match_col_indices):
+    \"\"\"Read CSV and create composite keys from multiple columns\"\"\"
     data = []
     match_values = set()
     
@@ -111,11 +122,18 @@ def read_csv_with_index_column(filename, match_col_idx):
                     
                     data.append(row_dict)
                     
-                    # Add match value to set (using 0-based indexing)
-                    if match_col_idx < len(row):
-                        match_val = row[match_col_idx].strip()
-                        if match_val:  # Only add non-empty values
-                            match_values.add(match_val)
+                    # Create composite match key from specified columns
+                    match_components = []
+                    for col_idx in match_col_indices:
+                        if col_idx < len(row):
+                            match_components.append(row[col_idx].strip())
+                        else:
+                            match_components.append('')
+                    
+                    # Join components with a delimiter that's unlikely to appear in data
+                    match_key = '§§§'.join(match_components)
+                    if any(comp for comp in match_components):  # Only add if at least one component is non-empty
+                        match_values.add(match_key)
                 
                 return data, headers, match_values
         except UnicodeDecodeError:
@@ -130,53 +148,120 @@ def write_csv_from_dict_list(filename, data, fieldnames):
         writer.writeheader()
         writer.writerows(data)
 
+def get_column_names(headers, indices):
+    \"\"\"Get column names for given indices\"\"\"
+    names = []
+    for idx in indices:
+        if idx < len(headers):
+            names.append(headers[idx].strip())
+        else:
+            names.append(f'Column_{idx+1}')
+    return names
+
+# Parse column indices
+col1_indices = parse_column_indices('$col1_indices')
+col2_indices = parse_column_indices('$col2_indices')
+
 # Read both files
-file1_data, file1_headers, file1_match_values = read_csv_with_index_column('$file1', $col1_idx - 1)
-file2_data, file2_headers, file2_match_values = read_csv_with_index_column('$file2', $col2_idx - 1)
+file1_data, file1_headers, file1_match_values = read_csv_with_multi_columns('$file1', col1_indices)
+file2_data, file2_headers, file2_match_values = read_csv_with_multi_columns('$file2', col2_indices)
 
 output_type = '$output_type'
 export_from = '$export_from'
 base_name = '$base_name'
-col1_idx = $col1_idx - 1  # Convert to 0-based
-col2_idx = $col2_idx - 1  # Convert to 0-based
+show_summary = '$show_summary'
 
 # Get column names for reference
-col1_name = file1_headers[col1_idx].strip() if col1_idx < len(file1_headers) else f'Column_{col1_idx+1}'
-col2_name = file2_headers[col2_idx].strip() if col2_idx < len(file2_headers) else f'Column_{col2_idx+1}'
+col1_names = get_column_names(file1_headers, col1_indices)
+col2_names = get_column_names(file2_headers, col2_indices)
 
 print(f'Matching on:')
-print(f'  File 1 column: {col1_name}')
-print(f'  File 2 column: {col2_name}')
+if len(col1_indices) == 1:
+    print(f'  File 1 column: {col1_names[0]}')
+else:
+    print(f'  File 1 columns: {\" + \".join(col1_names)} (combined in order)')
+
+if len(col2_indices) == 1:
+    print(f'  File 2 column: {col2_names[0]}')
+else:
+    print(f'  File 2 columns: {\" + \".join(col2_names)} (combined in order)')
+
 print(f'  Exporting from: {\"File 1\" if export_from == \"file1\" else \"File 2\"}')
+print(f'  Column order: Preserved as specified (important for multi-column matching)')
 print()
 
 # Determine which file's data and headers to use for export
 if export_from == 'file1':
     export_data = file1_data
     export_headers = file1_headers
-    export_match_col_idx = col1_idx
+    export_match_indices = col1_indices
     reference_match_values = file2_match_values
     export_file_name = '$file1'
 else:
     export_data = file2_data
     export_headers = file2_headers
-    export_match_col_idx = col2_idx
+    export_match_indices = col2_indices
     reference_match_values = file1_match_values
     export_file_name = '$file2'
+
+# Calculate matching and non-matching counts
+matching_count = 0
+non_matching_count = 0
+
+for row in export_data:
+    # Create composite match key from export file
+    row_values = list(row.values())
+    match_components = []
+    for col_idx in export_match_indices:
+        if col_idx < len(row_values):
+            match_components.append(row_values[col_idx].strip())
+        else:
+            match_components.append('')
+    
+    match_key = '§§§'.join(match_components)
+    
+    # Check if this key exists in reference file
+    if match_key and match_key in reference_match_values:
+        matching_count += 1
+    else:
+        non_matching_count += 1
+
+# Show summary if requested or in summary_only mode
+if show_summary in ['true', 'summary_only']:
+    print('📊 SUMMARY:')
+    print(f'  Total rows in export file: {len(export_data)}')
+    print(f'  Unique match keys in File 1: {len(file1_match_values)}')
+    print(f'  Unique match keys in File 2: {len(file2_match_values)}')
+    print(f'  Rows with matches: {matching_count}')
+    print(f'  Rows without matches: {non_matching_count}')
+    if output_type == 'matching':
+        print(f'  → Will export {matching_count} matching rows')
+    else:
+        print(f'  → Will export {non_matching_count} non-matching rows')
+    print()
+
+# Exit early if this is summary_only mode
+if show_summary == 'summary_only':
+    sys.exit(0)
 
 if output_type == 'matching':
     # Find rows in export file that have matching values in reference file
     matching_rows = []
     
     for row in export_data:
-        # Get the match value from export file
-        match_val = ''
-        col_values = list(row.values())
-        if export_match_col_idx < len(col_values):
-            match_val = col_values[export_match_col_idx].strip()
+        # Create composite match key from export file
+        row_values = list(row.values())
+        match_components = []
+        for col_idx in export_match_indices:
+            if col_idx < len(row_values):
+                match_components.append(row_values[col_idx].strip())
+            else:
+                match_components.append('')
         
-        # Check if this value exists in reference file
-        if match_val and match_val in reference_match_values:
+        match_key = '§§§'.join(match_components)
+        
+        # Check if this key exists in reference file
+        if match_key and match_key in reference_match_values:
             matching_rows.append(row)
     
     if matching_rows:
@@ -194,14 +279,19 @@ else:  # non_matching
     non_matching_rows = []
     
     for row in export_data:
-        # Get the match value from export file
-        match_val = ''
-        col_values = list(row.values())
-        if export_match_col_idx < len(col_values):
-            match_val = col_values[export_match_col_idx].strip()
+        # Create composite match key from export file
+        row_values = list(row.values())
+        match_components = []
+        for col_idx in export_match_indices:
+            if col_idx < len(row_values):
+                match_components.append(row_values[col_idx].strip())
+            else:
+                match_components.append('')
         
-        # Check if this value does NOT exist in reference file
-        if not match_val or match_val not in reference_match_values:
+        match_key = '§§§'.join(match_components)
+        
+        # Check if this key does NOT exist in reference file
+        if not match_key or match_key not in reference_match_values:
             non_matching_rows.append(row)
     
     if non_matching_rows:
@@ -252,31 +342,52 @@ main() {
     
     echo "📁 Selected ${#csv_files[@]} files:"
     for file in "${csv_files[@]}"; do
-        printf '   %s\n' "$(echo "$file" | sed 's|^\./||')"
+        printf '   %s\n' "$(basename "$file")"
     done
     echo
     
     # Check if files are readable
     if [[ ! -r "$file1" ]]; then
-        echo "❌ Cannot read $file1"
+        echo "❌ Cannot read $(basename "$file1")"
         exit 1
     fi
     
     if [[ ! -r "$file2" ]]; then
-        echo "❌ Cannot read $file2"
+        echo "❌ Cannot read $(basename "$file2")"
         exit 1
     fi
     
     # Show headers
     echo "📋 File headers:"
     echo
-    echo "File 1: $file1"
+    echo "File 1: $(basename "$file1")"
     get_columns "$file1"
     echo
-    echo "File 2: $file2"
+    echo "File 2: $(basename "$file2")"
     get_columns "$file2"
     echo
     
+# Function to validate column selection
+validate_column_selection() {
+    local selection="$1"
+    local max_cols="$2"
+    
+    # Check if selection contains only numbers, commas, and spaces
+    if [[ ! "$selection" =~ ^[0-9,[:space:]]+$ ]]; then
+        return 1
+    fi
+    
+    # Parse and validate each column number
+    IFS=',' read -ra COLS <<< "$selection"
+    for col in "${COLS[@]}"; do
+        col=$(echo "$col" | tr -d '[:space:]')  # Remove spaces
+        if [[ ! "$col" =~ ^[0-9]+$ ]] || [[ "$col" -lt 1 ]] || [[ "$col" -gt "$max_cols" ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
     # Get column selection for file 1
     local num_cols1=$(python3 -c "
 import csv
@@ -295,12 +406,21 @@ for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
         continue  # Try next encoding
 ")
     
+    echo "Select column(s) from File 1 to match on:"
+    echo "  • For single column: enter column number (e.g.: 3)"
+    echo "  • For multiple columns: enter comma-separated numbers (e.g.: 1,3,5)"
+    echo "  • Column order matters: matching will preserve the order you specify"
+    echo
+    
     while true; do
-        read -p "Select column number from File 1 to match on (1-$num_cols1): " -r col1_choice
-        if [[ "$col1_choice" =~ ^[0-9]+$ ]] && [[ "$col1_choice" -ge 1 ]] && [[ "$col1_choice" -le "$num_cols1" ]]; then
+        read -p "Column selection for File 1 (1-$num_cols1): " -r col1_choice
+        if validate_column_selection "$col1_choice" "$num_cols1"; then
+            # Remove spaces and store
+            col1_choice=$(echo "$col1_choice" | tr -d '[:space:]')
             break
         else
-            echo "❌ Invalid choice. Please enter a number between 1 and $num_cols1."
+            echo "❌ Invalid selection. Please enter valid column numbers between 1 and $num_cols1."
+            echo "   Examples: '3' for single column, '1,3,5' for multiple columns"
         fi
     done
     
@@ -322,12 +442,22 @@ for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
         continue  # Try next encoding
 ")
     
+    echo
+    echo "Select column(s) from File 2 to match on:"
+    echo "  • For single column: enter column number (e.g.: 2)"
+    echo "  • For multiple columns: enter comma-separated numbers (e.g.: 2,4,6)"
+    echo "  • Column order matters: matching will preserve the order you specify"
+    echo
+    
     while true; do
-        read -p "Select column number from File 2 to match on (1-$num_cols2): " -r col2_choice
-        if [[ "$col2_choice" =~ ^[0-9]+$ ]] && [[ "$col2_choice" -ge 1 ]] && [[ "$col2_choice" -le "$num_cols2" ]]; then
+        read -p "Column selection for File 2 (1-$num_cols2): " -r col2_choice
+        if validate_column_selection "$col2_choice" "$num_cols2"; then
+            # Remove spaces and store
+            col2_choice=$(echo "$col2_choice" | tr -d '[:space:]')
             break
         else
-            echo "❌ Invalid choice. Please enter a number between 1 and $num_cols2."
+            echo "❌ Invalid selection. Please enter valid column numbers between 1 and $num_cols2."
+            echo "   Examples: '2' for single column, '2,4,6' for multiple columns"
         fi
     done
     
@@ -335,8 +465,8 @@ for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
     
     # Prompt for which file to export from
     echo "Choose which file to export rows from:"
-    echo "  1) Export from File 1: $file1"
-    echo "  2) Export from File 2: $file2"
+    echo "  1) Export from File 1: $(basename "$file1")"
+    echo "  2) Export from File 2: $(basename "$file2")"
     echo
     
     while true; do
@@ -387,14 +517,34 @@ for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
     local base_name=$(longest_common_substring "$file1" "$file2")
     
     echo "📝 Processing files..."
-    echo "   Export from: $([ "$export_from" = "file1" ] && echo "$file1" || echo "$file2")"
+    echo "   Export from: $([ "$export_from" = "file1" ] && basename "$file1" || basename "$file2")"
     echo "   Output type: $output_type"
     echo
     
-    # Perform the matching
-    match_csv_files "$file1" "$file2" "$col1_choice" "$col2_choice" "$output_type" "$export_from" "$base_name"
+    # Show summary first
+    echo "Analyzing files for matching preview..."
+    match_csv_files "$file1" "$file2" "$col1_choice" "$col2_choice" "$output_type" "$export_from" "$base_name" "summary_only"
     
-    echo "🎉 Matching completed successfully!"
+    echo
+    while true; do
+        read -p "Do you want to proceed with the export? (y/n): " -r proceed_choice
+        case $proceed_choice in
+            [Yy]|[Yy][Ee][Ss])
+                echo
+                echo "📝 Exporting matching results..."
+                match_csv_files "$file1" "$file2" "$col1_choice" "$col2_choice" "$output_type" "$export_from" "$base_name" "export_only"
+                echo "🎉 Matching completed successfully!"
+                break
+                ;;
+            [Nn]|[Nn][Oo])
+                echo "Export cancelled."
+                exit 0
+                ;;
+            *)
+                echo "❌ Invalid choice. Please enter 'y' for yes or 'n' for no."
+                ;;
+        esac
+    done
 }
 
 # Run main function
