@@ -97,47 +97,47 @@ def parse_column_indices(indices_str):
     return indices
 
 def read_csv_with_multi_columns(filename, match_col_indices):
-    \"\"\"Read CSV and create composite keys from multiple columns\"\"\"
-    data = []
-    match_values = set()
-    
-    # Try different encodings
+    \"\"\"Read CSV and create composite keys from multiple columns.
+
+    Important: re-initialize buffers on each encoding attempt to avoid
+    duplicating partially-read rows when a UnicodeDecodeError occurs mid-read.
+    \"\"\"
     encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
     
     for encoding in encodings:
+        data = []
+        match_values = set()
         try:
-            with open(filename, 'r', encoding=encoding) as f:
+            with open(filename, 'r', encoding=encoding, newline='') as f:
                 reader = csv.reader(f)
                 headers = next(reader)
-                
+
                 for row_num, row in enumerate(reader):
                     # Pad row if it has fewer columns than headers
                     while len(row) < len(headers):
                         row.append('')
-                    
-                    # Create row dict
+
+                    # Build row dict preserving header order
                     row_dict = {}
                     for i, header in enumerate(headers):
                         row_dict[header.strip()] = row[i] if i < len(row) else ''
-                    
                     data.append(row_dict)
-                    
-                    # Create composite match key from specified columns
+
+                    # Composite match key
                     match_components = []
                     for col_idx in match_col_indices:
                         if col_idx < len(row):
                             match_components.append(row[col_idx].strip())
                         else:
                             match_components.append('')
-                    
-                    # Join components with a delimiter that's unlikely to appear in data
+
                     match_key = '§§§'.join(match_components)
-                    if any(comp for comp in match_components):  # Only add if at least one component is non-empty
+                    if any(comp for comp in match_components):
                         match_values.add(match_key)
-                
+
                 return data, headers, match_values
         except UnicodeDecodeError:
-            if encoding == encodings[-1]:  # Last encoding attempt
+            if encoding == encodings[-1]:
                 print(f\"❌ Could not decode {filename} with any of the attempted encodings.\")
                 sys.exit(1)
             continue  # Try next encoding
