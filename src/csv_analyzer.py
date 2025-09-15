@@ -23,7 +23,11 @@ def analyze_csv_columns(csv_file):
         try:
             with open(csv_file, "r", encoding=encoding) as f:
                 reader = csv.reader(f)
-                headers = next(reader)
+                try:
+                    headers = next(reader)
+                except StopIteration:
+                    # Empty file
+                    return [], 0
 
                 # Initialize counters for each column
                 total_rows = 0
@@ -31,6 +35,10 @@ def analyze_csv_columns(csv_file):
 
                 # Process each row
                 for row in reader:
+                    # Skip completely empty rows
+                    if not row or all(not cell.strip() for cell in row):
+                        continue
+
                     total_rows += 1
 
                     # Check each column in this row

@@ -1,0 +1,20 @@
+name,email,phone,address,notes,status,empty_col
+John Doe,john@example.com,555-1234,"123 Main St, City, State","Active user",active,
+Jane Smith,jane@example.com,,,"Multi-line
+notes with
+newlines","inactive",
+Bob Johnson,,555-9876,"456 Oak Ave
+Suite 100","Notes with, comma, in them","pending",
+Alice Brown,alice@example.com,555-5555,789 Pine Rd,"Regular notes",active,
+Charlie Wilson,,,,"Special chars: @#$%^&*()","draft",
+
+
+Eve Davis,eve@test.org,555-1111,321 Elm St,"Another user",active,
+Frank Miller,frank@company.net,,,"Empty
+lines
+above
+and
+below","suspended",
+
+
+Grace Lee,grace@domain.com,555-9999,654 Birch Ln,"Last entry",active,
