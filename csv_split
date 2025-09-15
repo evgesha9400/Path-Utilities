@@ -12,7 +12,17 @@ get_header() {
 
 # Function to count data rows (excluding header)
 count_data_rows() {
-    tail -n +2 "$1" | wc -l | tr -d ' '
+    python3 -c "
+import csv
+import sys
+try:
+    with open('$1', 'r') as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+        print(len(rows) - 1)
+except Exception as e:
+    print('0')
+"
 }
 
 # Function to show menu
@@ -106,34 +116,46 @@ split_by_count() {
     
     echo "✂️  Splitting file..."
     
-    # Create temporary file with data only (no header)
-    local temp_data=$(mktemp)
-    tail -n +2 "$input_file" > "$temp_data"
+    # Use Python to properly handle CSV splitting
+    python3 -c "
+import csv
+import sys
+
+input_file = '$input_file'
+num_files = $num_files
+base_name = '$base_name'
+base_rows = $base_rows
+extra_rows = $extra_rows
+
+# Read all data
+with open(input_file, 'r') as f:
+    reader = csv.reader(f)
+    rows = list(reader)
+
+header = rows[0]
+data_rows = rows[1:]
+
+current_row = 0
+for i in range(1, num_files + 1):
+    output_file = f'{base_name} - Part {i}.csv'
     
-    local current_row=1
-    for ((i=1; i<=num_files; i++)); do
-        local output_file="${base_name} - Part ${i}.csv"
-        
-        # Calculate rows for this file
-        local rows_in_file=$base_rows
-        if [[ $i -le $extra_rows ]]; then
-            rows_in_file=$((base_rows + 1))
-        fi
-        
-        # Write header
-        echo "$header" > "$output_file"
-        
-        # Write data rows
-        if [[ $rows_in_file -gt 0 ]]; then
-            sed -n "${current_row},$((current_row + rows_in_file - 1))p" "$temp_data" >> "$output_file"
-            current_row=$((current_row + rows_in_file))
-        fi
-        
-        echo "   ✓ Created $output_file with $rows_in_file data rows"
-    done
+    # Calculate rows for this file
+    rows_in_file = base_rows
+    if i <= extra_rows:
+        rows_in_file = base_rows + 1
     
-    # Clean up
-    rm -f "$temp_data"
+    # Write file
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        
+        if rows_in_file > 0:
+            end_row = current_row + rows_in_file
+            writer.writerows(data_rows[current_row:end_row])
+            current_row = end_row
+    
+    print(f'   ✓ Created {output_file} with {rows_in_file} data rows')
+"
     
     echo
     echo "🎉 Successfully split $input_file into $num_files files!"
@@ -184,34 +206,41 @@ split_by_max_rows() {
     
     echo "✂️  Splitting file..."
     
-    # Create temporary file with data only (no header)
-    local temp_data=$(mktemp)
-    tail -n +2 "$input_file" > "$temp_data"
+    # Use Python to properly handle CSV splitting
+    python3 -c "
+import csv
+import sys
+
+input_file = '$input_file'
+max_rows = $max_rows
+base_name = '$base_name'
+total_rows = $total_rows
+num_files = $num_files
+
+# Read all data
+with open(input_file, 'r') as f:
+    reader = csv.reader(f)
+    rows = list(reader)
+
+header = rows[0]
+data_rows = rows[1:]
+
+for i in range(1, num_files + 1):
+    output_file = f'{base_name} - Part {i}.csv'
+    start_row = (i-1) * max_rows
+    end_row = min(i * max_rows, total_rows)
+    rows_in_file = end_row - start_row
     
-    for ((i=1; i<=num_files; i++)); do
-        local output_file="${base_name} - Part ${i}.csv"
-        local start_row=$(( (i-1) * max_rows + 1 ))
-        local end_row=$(( i * max_rows ))
+    # Write file
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
         
-        if [[ $end_row -gt $total_rows ]]; then
-            end_row=$total_rows
-        fi
-        
-        local rows_in_file=$((end_row - start_row + 1))
-        
-        # Write header
-        echo "$header" > "$output_file"
-        
-        # Write data rows
-        if [[ $rows_in_file -gt 0 ]]; then
-            sed -n "${start_row},${end_row}p" "$temp_data" >> "$output_file"
-        fi
-        
-        echo "   ✓ Created $output_file with $rows_in_file data rows"
-    done
+        if rows_in_file > 0:
+            writer.writerows(data_rows[start_row:end_row])
     
-    # Clean up
-    rm -f "$temp_data"
+    print(f'   ✓ Created {output_file} with {rows_in_file} data rows')
+"
     
     echo
     echo "🎉 Successfully split $input_file into $num_files files!"
