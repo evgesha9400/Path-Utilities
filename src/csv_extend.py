@@ -524,7 +524,7 @@ Examples:
 
         # Let user select files
         csv_files = select_multiple_files(
-            "CSV File Selection", 2, 2, "*.csv", ".", "interactive", False
+            "CSV File Selection", 2, 2, "*.csv", ".", False
         )
         if not csv_files:
             sys.exit(1)
