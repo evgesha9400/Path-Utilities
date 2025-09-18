@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from csv_analyzer import analyze_csv_columns
+from src.csv_analyzer import analyze_csv_columns
 
 
 class TestCSVAnalyzer(unittest.TestCase):

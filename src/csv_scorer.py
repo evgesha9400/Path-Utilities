@@ -53,7 +53,7 @@ class JobTitleScorer:
         self.load_config()
 
     def load_config(self):
-        """Load keyword-score pairs from configuration file."""
+        """Load keyword-score pairs from the configuration file."""
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
@@ -114,9 +114,10 @@ class JobTitleScorer:
         self.keywords = default_config["keywords"]
         print(f"Created default config file: {self.config_file}")
 
-    def _create_keyword_pattern(self, keyword):
+    @staticmethod
+    def _create_keyword_pattern(keyword):
         """
-        Create regex pattern for keyword matching with wildcard support.
+        Create a regex pattern for keyword matching with wildcard support.
         Supports:
         - keyword (exact word match)
         - *keyword (suffix match)
@@ -131,7 +132,7 @@ class JobTitleScorer:
             return None
 
         if keyword_lower.startswith("*") and keyword_lower.endswith("*"):
-            # *keyword* - contains match
+            # *keyword* - contains a match
             actual_keyword = keyword_lower[1:-1]
             return re.escape(actual_keyword)
         elif keyword_lower.startswith("*"):
@@ -150,7 +151,7 @@ class JobTitleScorer:
                     r"\b" + re.escape(parts[0]) + r".*?" + re.escape(parts[1]) + r"\b"
                 )
             else:
-                # Multiple * in middle - treat as contains match
+                # Multiple * in middle - treat as contains a match
                 actual_keyword = keyword_lower.replace("*", "")
                 return re.escape(actual_keyword)
         else:
@@ -159,7 +160,7 @@ class JobTitleScorer:
 
     def calculate_score(self, job_title):
         """
-        Calculate score for a job title based on keyword matches.
+        Calculate the score for a job title based on keyword matches.
         Returns tuple: (final_score, calculation_details, character_percentage)
         """
         if not job_title or pd.isna(job_title):
@@ -170,16 +171,17 @@ class JobTitleScorer:
         # Check for hard excludes first (keywords with score -100)
         for keyword, score in self.keywords.items():
             if score == -100:
-                pattern = self._create_keyword_pattern(keyword)
+                pattern = JobTitleScorer._create_keyword_pattern(keyword)
                 if pattern and re.search(pattern, job_title_lower):
                     return 0.000, f"hard exclude: {keyword}", 0.0
 
         # Check for hard includes (keywords with score 100) - but still apply character normalization
         for keyword, score in self.keywords.items():
             if score == 100:
-                pattern = self._create_keyword_pattern(keyword)
+                pattern = JobTitleScorer._create_keyword_pattern(keyword)
                 if pattern:
-                    match = re.search(pattern, job_title_lower)
+                    compiled_pattern = re.compile(pattern)
+                    match = compiled_pattern.search(job_title_lower)
                     if match:
                         # Calculate character percentage for hard includes
                         normalized_job_title = re.sub(r"[^a-zA-Z0-9]", "", job_title)
@@ -219,14 +221,15 @@ class JobTitleScorer:
         matched_positions = set()
 
         for keyword, score in sorted_keywords:
-            pattern = self._create_keyword_pattern(keyword)
+            pattern = JobTitleScorer._create_keyword_pattern(keyword)
 
-            # Skip if pattern is None (stop word)
+            # Skip if a pattern is None (stop word)
             if not pattern:
                 continue
 
             # Find all occurrences of the keyword
-            for match in re.finditer(pattern, job_title_lower):
+            compiled_pattern = re.compile(pattern)
+            for match in compiled_pattern.finditer(job_title_lower):
                 start, end = match.span()
 
                 # Check if this position hasn't been matched by a longer keyword
@@ -236,10 +239,10 @@ class JobTitleScorer:
 
                     # Mark these positions as matched
                     matched_positions.update(range(start, end))
-                    break  # Only count first occurrence of each keyword
+                    break  # Only count the first occurrence of each keyword
 
         # Calculate character percentage (normalized - only alphanumeric characters)
-        # Remove spaces and special characters from job title for content-focused calculation
+        # Remove spaces and special characters from the job title for content-focused calculation
         normalized_job_title = re.sub(r"[^a-zA-Z0-9]", "", job_title)
         total_content_characters = len(normalized_job_title)
 
@@ -250,14 +253,15 @@ class JobTitleScorer:
         total_matched_chars = 0
 
         for keyword, score in matched_keywords:
-            pattern = self._create_keyword_pattern(keyword)
+            pattern = JobTitleScorer._create_keyword_pattern(keyword)
 
-            # Skip if pattern is None (stop word)
+            # Skip if a pattern is None (stop word)
             if not pattern:
                 continue
 
             # Find all occurrences of the keyword
-            for match in re.finditer(pattern, job_title_lower):
+            compiled_pattern = re.compile(pattern)
+            for match in compiled_pattern.finditer(job_title_lower):
                 start, end = match.span()
                 # Extract the matched text and count only alphanumeric characters
                 matched_text = job_title_lower[start:end]
@@ -273,13 +277,13 @@ class JobTitleScorer:
                         score  # Negative scores are not scaled by character percentage
                     )
 
-                break  # Only count first occurrence of each keyword
+                break  # Only count the first occurrence of each keyword
 
         # Calculate character percentage only for positive contributions
         positive_character_percentage = (
             positive_matched_chars / total_content_characters
             if total_content_characters > 0 and positive_matched_chars > 0
-            else 0.0  # If no positive characters matched, multiplier should be 0
+            else 0.0  # If no positive characters matched, the multiplier should be 0
         )
 
         # Apply character-based normalization to all positive scores
@@ -335,7 +339,7 @@ class JobTitleScorer:
     def process_csv(
         self, input_file, job_title_column, output_file=None, test_mode=False
     ):
-        """Process CSV file and add scoring columns."""
+        """Process the CSV file and add scoring columns."""
         if not os.path.exists(input_file):
             print(f"Error: Input file '{input_file}' not found.")
             sys.exit(1)
@@ -352,7 +356,6 @@ class JobTitleScorer:
             with open(input_file, "r", encoding="utf-8", newline="") as infile:
                 # For complex CSVs with quoted fields containing commas,
                 # try comma first (most common), then fall back to sniffer
-                delimiter = ","  # Default to comma
 
                 # Try reading with comma delimiter first
                 infile.seek(0)
@@ -373,21 +376,25 @@ class JobTitleScorer:
                             sniffer = csv.Sniffer()
                             delimiter = sniffer.sniff(sample).delimiter
                         except csv.Error:
-                            # If sniffer fails, try to detect manually
+                            # If the sniffer fails, try to detect manually
                             if "\t" in sample and sample.count("\t") > sample.count(
                                 ","
                             ):
                                 delimiter = "\t"
                             else:
                                 delimiter = ","
-                except Exception:
+                except (UnicodeDecodeError, csv.Error, AttributeError, OSError):
                     # If anything fails, default to comma
                     delimiter = ","
 
                 reader = csv.DictReader(infile, delimiter=delimiter)
                 fieldnames = reader.fieldnames
 
-                # Check if job title column exists
+                # Check if fieldnames is None or if the job title column exists
+                if fieldnames is None:
+                    print("Error: No fieldnames found in CSV file.")
+                    sys.exit(1)
+                
                 if job_title_column not in fieldnames:
                     print(f"Error: Column '{job_title_column}' not found in CSV.")
                     print(f"Available columns: {', '.join(fieldnames)}")
@@ -414,11 +421,11 @@ class JobTitleScorer:
                     )
 
                     # Only consider scores for normalization if they're not hard includes
-                    # Hard includes should maintain their intended score
+                    #  should maintain their intended score
                     if not calculation.startswith("hard include"):
                         max_score = max(max_score, score)
 
-                # Determine normalization factor
+                # Determine the normalization factor
                 normalization_factor = 1.0
                 if max_score > 1.0:
                     normalization_factor = 1.0 / max_score
@@ -436,7 +443,7 @@ class JobTitleScorer:
                         "score_calculation",
                     ]
                 else:
-                    output_fieldnames = fieldnames + [
+                    output_fieldnames = list(fieldnames) + [
                         "job_title_score",
                         "score_calculation",
                     ]
