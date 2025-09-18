@@ -1,10 +1,13 @@
 #!/bin/bash
 
-# csv_diff - Simple Bash Wrapper
+# csv_delete_col - Simple Bash Wrapper
 # Redirects to Python script with all arguments
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Set PYTHONPATH to include the src directory so Python can find the shared module
+export PYTHONPATH="$SCRIPT_DIR/../src:$PYTHONPATH"
+
 # Execute the Python script with all arguments passed through
-exec python3 "$SCRIPT_DIR/src/csv_diff.py" "$@"
+exec python3 "$SCRIPT_DIR/../src/csv_delete_col.py" "$@"
