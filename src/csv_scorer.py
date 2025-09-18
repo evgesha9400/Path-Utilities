@@ -347,7 +347,7 @@ class JobTitleScorer:
         # Generate output filename if not provided
         if output_file is None:
             input_path = Path(input_file)
-            suffix = "_test" if test_mode else "_scored"
+            suffix = "-test" if test_mode else "-scored"
             output_file = (
                 input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
             )
@@ -527,7 +527,7 @@ def main():
         "job_title_column", help="Name of the column containing job titles"
     )
     parser.add_argument(
-        "--output", "-o", help="Output CSV file path (default: input_scored.csv)"
+        "--output", "-o", help="Output CSV file path (default: input-scored.csv)"
     )
     parser.add_argument(
         "--config",
