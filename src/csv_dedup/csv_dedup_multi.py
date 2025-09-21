@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from shared.file_selector import select_single_file
+from src.shared.file_selector import select_single_file
 
 
 def get_row_count(input_file):
@@ -43,7 +43,11 @@ def read_csv_data(filename):
     data = []
     with open(filename, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        headers = next(reader)
+        try:
+            headers = next(reader)
+        except StopIteration:
+            # Handle completely empty files
+            return [], []
 
         for row_num, row in enumerate(reader):
             while len(row) < len(headers):
@@ -65,6 +69,14 @@ def analyze_multi_duplicates(input_file, column_indices):
     """Analyze multi-column duplicates in CSV file"""
     data, headers = read_csv_data(input_file)
     original_count = len(data)
+    
+    # Handle empty files
+    if not headers:
+        print("📊 File Analysis:")
+        print("   Total rows: 0")
+        print("   Empty file - no duplicates possible")
+        return 0
+    
     column_names = [headers[i].strip() for i in column_indices if i < len(headers)]
 
     print("📊 File Analysis:")

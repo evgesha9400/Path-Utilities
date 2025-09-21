@@ -19,6 +19,7 @@ This document tracks tasks, improvements, and enhancements for the Path Utilitie
   - [ ] Implement tests for `csv_merge_col.py` (currently empty)
   - [ ] Implement tests for `csv_remove_www.py` (currently empty)
   - [ ] Implement tests for `csv_split.py` (currently empty)
+  - [ ] `csv_scorer.py`: split option for two files above zero and below zero 
 
 ### Test Data Creation
 - [ ] **Create comprehensive test data files**

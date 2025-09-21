@@ -11,7 +11,7 @@ import csv
 import os
 import sys
 
-from shared.file_selector import select_single_file
+from src.shared.file_selector import select_single_file
 
 
 def analyze_csv_columns(csv_file):
