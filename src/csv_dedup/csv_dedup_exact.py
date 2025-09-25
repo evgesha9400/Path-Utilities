@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from src.shared.file_selector import select_single_file
+from shared.file_selector import select_single_file
 
 
 def get_row_count(input_file):
@@ -39,9 +39,7 @@ def read_csv_data(filename):
             # Pad row if it has fewer columns than headers
             while len(row) < len(headers):
                 row.append("")
-            data.append(
-                (row, row_num + 2)
-            )  # +2 because we skip header and want 1-based line numbers
+            data.append((row, row_num + 2))  # +2 because we skip header and want 1-based line numbers
 
     return data, headers
 
@@ -58,7 +56,7 @@ def analyze_exact_duplicates(input_file):
     """Analyze exact duplicates in CSV file"""
     data, headers = read_csv_data(input_file)
     original_count = len(data)
-    
+
     # Handle empty files
     if not headers:
         print("📊 File Analysis:")
@@ -80,9 +78,7 @@ def analyze_exact_duplicates(input_file):
 
     # Find duplicates
     duplicate_keys = [key for key, rows in duplicate_groups.items() if len(rows) > 1]
-    total_duplicates = sum(
-        len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1
-    )
+    total_duplicates = sum(len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1)
 
     if len(duplicate_keys) == 0:
         print("✅ No exact duplicates found!")
@@ -92,9 +88,7 @@ def analyze_exact_duplicates(input_file):
         print("📊 Duplicate Summary:")
         print(f"   Unique groups with duplicates: {len(duplicate_keys):,}")
         print(f"   Total duplicate rows to remove: {total_duplicates:,}")
-        print(
-            f"   Final row count after deduplication: {original_count - total_duplicates:,}"
-        )
+        print(f"   Final row count after deduplication: {original_count - total_duplicates:,}")
         print(f"   Reduction: {(total_duplicates / original_count * 100):.1f}%")
         print()
 
@@ -110,11 +104,7 @@ def analyze_exact_duplicates(input_file):
 
             shown_groups += 1
             print(f"\n   Group {shown_groups}: {len(rows)} identical rows")
-            print(
-                f"     Content preview: {str(key)[:100]}..."
-                if len(str(key)) > 100
-                else f"     Content: {key}"
-            )
+            print(f"     Content preview: {str(key)[:100]}..." if len(str(key)) > 100 else f"     Content: {key}")
             print(f"     Found on lines: {', '.join(str(row[1]) for row in rows)}")
 
         if len(duplicate_keys) > max_groups_to_show:
@@ -161,15 +151,11 @@ def manual_deduplication(input_file, output_file):
                 print(f"\n  {i + 1}) ")
                 display_row(row_data, headers, line_num)
 
-            print(
-                f"\n  {len(rows) + 1}) Skip this group (keep first occurrence - line {rows[0][1]})"
-            )
+            print(f"\n  {len(rows) + 1}) Skip this group (keep first occurrence - line {rows[0][1]})")
 
             while True:
                 try:
-                    choice = input(
-                        f"\nSelect which row to keep (1-{len(rows) + 1}): "
-                    ).strip()
+                    choice = input(f"\nSelect which row to keep (1-{len(rows) + 1}): ").strip()
                     choice_num = int(choice)
 
                     if 1 <= choice_num <= len(rows):
@@ -181,13 +167,9 @@ def manual_deduplication(input_file, output_file):
                         print(f"✓ Keeping first occurrence (line {rows[0][1]})")
                         break
                     else:
-                        print(
-                            f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 1}."
-                        )
+                        print(f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 1}.")
                 except (ValueError, KeyboardInterrupt):
-                    print(
-                        f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 1}."
-                    )
+                    print(f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 1}.")
 
     # Sort by original line number to maintain order
     selected_rows.sort(key=lambda x: x[1])
@@ -242,9 +224,7 @@ def find_csv_files():
 
 def main():
     """Main function"""
-    parser = argparse.ArgumentParser(
-        description="CSV Exact Deduplication - Remove completely identical rows"
-    )
+    parser = argparse.ArgumentParser(description="CSV Exact Deduplication - Remove completely identical rows")
     parser.add_argument(
         "input_file",
         nargs="?",
@@ -268,9 +248,7 @@ def main():
     num_files = len(csv_files)
 
     # Select file
-    input_file = select_single_file(
-        "Select CSV file to deduplicate", "*.csv", ".", True
-    )
+    input_file = select_single_file("Select CSV file to deduplicate", "*.csv", ".", True)
     if not input_file:
         sys.exit(1)
 
@@ -308,9 +286,7 @@ def main():
     print()
 
     try:
-        proceed_choice = input(
-            "Do you want to proceed with deduplication? (y/N): "
-        ).strip()
+        proceed_choice = input("Do you want to proceed with deduplication? (y/N): ").strip()
     except KeyboardInterrupt:
         print("\n❌ Operation cancelled by user")
         sys.exit(1)

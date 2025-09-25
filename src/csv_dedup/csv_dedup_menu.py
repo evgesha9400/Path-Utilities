@@ -13,13 +13,9 @@ from pathlib import Path
 
 def show_help():
     """Show detailed help information"""
-    print(
-        "═══════════════════════════════════════════════════════════════════════════════════"
-    )
+    print("═══════════════════════════════════════════════════════════════════════════════════")
     print("DETAILED HELP")
-    print(
-        "═══════════════════════════════════════════════════════════════════════════════════"
-    )
+    print("═══════════════════════════════════════════════════════════════════════════════════")
     print()
     print("🔍 EXACT DUPLICATES (dedup_exact)")
     print("   Use when: You have rows that are byte-for-byte identical")
@@ -31,12 +27,8 @@ def show_help():
     print("     • Import errors that duplicated records")
     print()
     print("🔍 SINGLE-COLUMN DUPLICATES (dedup_single)")
-    print(
-        "   Use when: You want to keep only one record per unique value in one column"
-    )
-    print(
-        "   How it works: Groups by one column, lets you choose which duplicate to keep"
-    )
+    print("   Use when: You want to keep only one record per unique value in one column")
+    print("   How it works: Groups by one column, lets you choose which duplicate to keep")
     print("   Speed: Fast")
     print("   Automatic strategies:")
     print("     • First: Keep the first occurrence")
@@ -49,9 +41,7 @@ def show_help():
     print("     • User database with duplicate IDs")
     print()
     print("🔍 MULTI-COLUMN DUPLICATES (dedup_multi)")
-    print(
-        "   Use when: You want to remove duplicates based on a combination of columns"
-    )
+    print("   Use when: You want to remove duplicates based on a combination of columns")
     print("   How it works: Creates composite keys from multiple columns")
     print("   Speed: Moderate (depends on number of columns)")
     print("   Same automatic strategies and manual mode as single-column")
@@ -68,9 +58,7 @@ def show_help():
     print("   • Manual mode gives you full control but takes longer")
     print("   • 'Best' strategy prioritizes keeping the most complete records")
     print()
-    print(
-        "═══════════════════════════════════════════════════════════════════════════════════"
-    )
+    print("═══════════════════════════════════════════════════════════════════════════════════")
     print()
 
 
@@ -116,9 +104,7 @@ def main():
     print("2) SINGLE-COLUMN DUPLICATES (dedup_single)")
     print("   • Removes rows with duplicate values in ONE selected column")
     print("   • Choose automatic (first/last/best) or manual selection")
-    print(
-        "   • Example: Remove duplicate email addresses, keeping one person per email"
-    )
+    print("   • Example: Remove duplicate email addresses, keeping one person per email")
     print()
     print("3) MULTI-COLUMN DUPLICATES (dedup_multi)")
     print("   • Removes rows with duplicate combinations across MULTIPLE columns")
@@ -162,40 +148,26 @@ def main():
                 input()
                 print()
                 print("🔍 CSV DEDUPLICATION TOOLS")
-                print(
-                    "════════════════════════════════════════════════════════════════"
-                )
+                print("════════════════════════════════════════════════════════════════")
                 print("Choose the right deduplication method for your needs:")
-                print(
-                    "════════════════════════════════════════════════════════════════"
-                )
+                print("════════════════════════════════════════════════════════════════")
                 print()
                 print("Available deduplication methods:")
                 print()
                 print("1) EXACT DUPLICATES (dedup_exact)")
-                print(
-                    "   • Removes rows that are completely identical across ALL columns"
-                )
+                print("   • Removes rows that are completely identical across ALL columns")
                 print("   • Fastest method for simple exact duplicates")
-                print(
-                    "   • Example: Two rows with exactly the same data in every field"
-                )
+                print("   • Example: Two rows with exactly the same data in every field")
                 print()
                 print("2) SINGLE-COLUMN DUPLICATES (dedup_single)")
                 print("   • Removes rows with duplicate values in ONE selected column")
                 print("   • Choose automatic (first/last/best) or manual selection")
-                print(
-                    "   • Example: Remove duplicate email addresses, keeping one person per email"
-                )
+                print("   • Example: Remove duplicate email addresses, keeping one person per email")
                 print()
                 print("3) MULTI-COLUMN DUPLICATES (dedup_multi)")
-                print(
-                    "   • Removes rows with duplicate combinations across MULTIPLE columns"
-                )
+                print("   • Removes rows with duplicate combinations across MULTIPLE columns")
                 print("   • Choose automatic (first/last/best) or manual selection")
-                print(
-                    "   • Example: Remove duplicates based on firstName + lastName combination"
-                )
+                print("   • Example: Remove duplicates based on firstName + lastName combination")
                 print()
                 print("4) HELP - Show detailed explanations")
                 print()

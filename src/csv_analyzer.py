@@ -11,7 +11,7 @@ import csv
 import os
 import sys
 
-from src.shared.file_selector import select_single_file
+from shared.file_selector import select_single_file
 
 
 def analyze_csv_columns(csv_file):
@@ -54,9 +54,7 @@ def analyze_csv_columns(csv_file):
                 results = []
                 for col_idx, header in enumerate(headers):
                     filled_count = filled_counts[col_idx]
-                    percentage = (
-                        (filled_count / total_rows * 100) if total_rows > 0 else 0
-                    )
+                    percentage = (filled_count / total_rows * 100) if total_rows > 0 else 0
                     results.append(
                         {
                             "column": header.strip(),
@@ -71,9 +69,7 @@ def analyze_csv_columns(csv_file):
 
         except UnicodeDecodeError:
             if encoding == encodings[-1]:  # Last encoding attempt
-                print(
-                    f"❌ Could not decode {csv_file} with any of the attempted encodings."
-                )
+                print(f"❌ Could not decode {csv_file} with any of the attempted encodings.")
                 sys.exit(1)
             continue  # Try next encoding
 
@@ -101,9 +97,7 @@ def display_results(results, total_rows, csv_file):
     max_col_width = max(max_col_width, 10)  # Minimum width
 
     # Display results in a formatted table
-    print(
-        f"{'Column':<{max_col_width}} | {'Index':<6} | {'Filled':<10} | {'Total':<10} | {'Percentage':<10}"
-    )
+    print(f"{'Column':<{max_col_width}} | {'Index':<6} | {'Filled':<10} | {'Total':<10} | {'Percentage':<10}")
     print("-" * (max_col_width + 6 + 10 + 10 + 10 + 12))
 
     for result in results:
@@ -134,9 +128,7 @@ def display_results(results, total_rows, csv_file):
         f"  Completely filled columns: {completely_filled}/{len(results)} ({completely_filled / len(results) * 100:.1f}%)"
     )
     if empty_columns > 0:
-        print(
-            f"  Empty columns: {empty_columns}/{len(results)} ({empty_columns / len(results) * 100:.1f}%)"
-        )
+        print(f"  Empty columns: {empty_columns}/{len(results)} ({empty_columns / len(results) * 100:.1f}%)")
 
     # Show top and bottom performers
     print()
@@ -148,9 +140,7 @@ def display_results(results, total_rows, csv_file):
         print()
         print("⚠️  Bottom 3 Least Filled Columns:")
         for i, result in enumerate(results[-3:]):
-            print(
-                f"  {len(results) - 2 + i}. {result['column']} ({result['percentage']:.1f}%)"
-            )
+            print(f"  {len(results) - 2 + i}. {result['column']} ({result['percentage']:.1f}%)")
 
 
 def main():
@@ -188,9 +178,7 @@ Examples:
         print("🔍 Scanning for CSV files in current directory...")
 
         # Use the unified file selector
-        csv_file = select_single_file(
-            "CSV File Selection for Analysis", "*.csv", ".", False
-        )
+        csv_file = select_single_file("CSV File Selection for Analysis", "*.csv", ".", False)
         if not csv_file:
             sys.exit(1)
 

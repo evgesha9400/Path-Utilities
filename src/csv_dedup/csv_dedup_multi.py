@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from src.shared.file_selector import select_single_file
+from shared.file_selector import select_single_file
 
 
 def get_row_count(input_file):
@@ -69,14 +69,14 @@ def analyze_multi_duplicates(input_file, column_indices):
     """Analyze multi-column duplicates in CSV file"""
     data, headers = read_csv_data(input_file)
     original_count = len(data)
-    
+
     # Handle empty files
     if not headers:
         print("📊 File Analysis:")
         print("   Total rows: 0")
         print("   Empty file - no duplicates possible")
         return 0
-    
+
     column_names = [headers[i].strip() for i in column_indices if i < len(headers)]
 
     print("📊 File Analysis:")
@@ -103,23 +103,17 @@ def analyze_multi_duplicates(input_file, column_indices):
 
     # Find duplicates
     duplicate_keys = [key for key, rows in duplicate_groups.items() if len(rows) > 1]
-    total_duplicates = sum(
-        len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1
-    )
+    total_duplicates = sum(len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1)
 
     if len(duplicate_keys) == 0:
         print("✅ No duplicates found!")
-        print(
-            f"   All {original_count:,} rows have unique combinations of the selected columns."
-        )
+        print(f"   All {original_count:,} rows have unique combinations of the selected columns.")
         return 0
     else:
         print("📊 Duplicate Summary:")
         print(f"   Unique groups with duplicates: {len(duplicate_keys):,}")
         print(f"   Total duplicate rows to remove: {total_duplicates:,}")
-        print(
-            f"   Final row count after deduplication: {original_count - total_duplicates:,}"
-        )
+        print(f"   Final row count after deduplication: {original_count - total_duplicates:,}")
         print(f"   Reduction: {(total_duplicates / original_count * 100):.1f}%")
         print()
 
@@ -138,17 +132,11 @@ def analyze_multi_duplicates(input_file, column_indices):
             # Format the composite key for display
             key_display = []
             for i, (col_idx, key_part) in enumerate(zip(column_indices, composite_key)):
-                col_name = (
-                    column_names[i] if i < len(column_names) else f"col_{col_idx}"
-                )
-                display_value = (
-                    key_part if len(key_part) <= 30 else key_part[:27] + "..."
-                )
+                col_name = column_names[i] if i < len(column_names) else f"col_{col_idx}"
+                display_value = key_part if len(key_part) <= 30 else key_part[:27] + "..."
                 key_display.append(f'{col_name}="{display_value}"')
 
-            print(
-                f"\n   Group {shown_groups}: {len(rows)} rows with {' | '.join(key_display)}"
-            )
+            print(f"\n   Group {shown_groups}: {len(rows)} rows with {' | '.join(key_display)}")
             print(f"     Found on lines: {', '.join(str(row[1]) for row in rows)}")
 
             # Show filled column counts for each row
@@ -167,9 +155,7 @@ def display_row(row, headers, line_num, key_column_indices):
     """Display a single row for manual selection"""
     print(f"     Line {line_num} ({count_filled_columns(row)} filled columns):")
     for i, (header, value) in enumerate(zip(headers, row)):
-        if (
-            value.strip() or i in key_column_indices
-        ):  # Show non-empty values or key columns
+        if value.strip() or i in key_column_indices:  # Show non-empty values or key columns
             display_value = value[:50] + "..." if len(value) > 50 else value
             marker = " ★" if i in key_column_indices else ""
             print(f"       {header}: {display_value}{marker}")
@@ -208,17 +194,11 @@ def manual_deduplication(input_file, column_indices, output_file):
             # Format the composite key for display
             key_display = []
             for i, (col_idx, key_part) in enumerate(zip(column_indices, composite_key)):
-                col_name = (
-                    column_names[i] if i < len(column_names) else f"col_{col_idx}"
-                )
-                display_value = (
-                    key_part if len(key_part) <= 30 else key_part[:27] + "..."
-                )
+                col_name = column_names[i] if i < len(column_names) else f"col_{col_idx}"
+                display_value = key_part if len(key_part) <= 30 else key_part[:27] + "..."
                 key_display.append(f'{col_name}="{display_value}"')
 
-            print(
-                f"\n🔍 Duplicate Group {group_num} ({len(rows)} rows with {' | '.join(key_display)}):"
-            )
+            print(f"\n🔍 Duplicate Group {group_num} ({len(rows)} rows with {' | '.join(key_display)}):")
             print("=" * 80)
             print("(★ indicates deduplication columns)")
 
@@ -227,15 +207,11 @@ def manual_deduplication(input_file, column_indices, output_file):
                 display_row(row_data, headers, line_num, set(column_indices))
 
             print(f"\n  {len(rows) + 1}) Auto-select best (most filled columns)")
-            print(
-                f"  {len(rows) + 2}) Skip this group (keep first occurrence - line {rows[0][1]})"
-            )
+            print(f"  {len(rows) + 2}) Skip this group (keep first occurrence - line {rows[0][1]})")
 
             while True:
                 try:
-                    choice = input(
-                        f"\nSelect which row to keep (1-{len(rows) + 2}): "
-                    ).strip()
+                    choice = input(f"\nSelect which row to keep (1-{len(rows) + 2}): ").strip()
                     choice_num = int(choice)
 
                     if 1 <= choice_num <= len(rows):
@@ -255,13 +231,9 @@ def manual_deduplication(input_file, column_indices, output_file):
                         print(f"✓ Keeping first occurrence (line {rows[0][1]})")
                         break
                     else:
-                        print(
-                            f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 2}."
-                        )
+                        print(f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 2}.")
                 except (ValueError, KeyboardInterrupt):
-                    print(
-                        f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 2}."
-                    )
+                    print(f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 2}.")
 
     # Sort by original line number to maintain order
     selected_rows.sort(key=lambda x: x[1])
@@ -302,9 +274,7 @@ def auto_deduplication(input_file, column_indices, strategy, output_file):
         else:  # best
             # Find rows with maximum filled columns
             max_filled = max(count_filled_columns(row[0]) for row in rows)
-            best_rows = [
-                row for row in rows if count_filled_columns(row[0]) == max_filled
-            ]
+            best_rows = [row for row in rows if count_filled_columns(row[0]) == max_filled]
             # If tie, keep first
             return min(best_rows, key=lambda x: x[1])
 
@@ -360,12 +330,8 @@ def main():
 
     print("🔍 MULTI-COLUMN DEDUPLICATION")
     print("════════════════════════════════════════════════════════════════")
-    print(
-        "This script removes rows that have duplicate values across MULTIPLE selected columns."
-    )
-    print(
-        "• Choose which columns to combine as the duplicate key (e.g., firstName+lastName)"
-    )
+    print("This script removes rows that have duplicate values across MULTIPLE selected columns.")
+    print("• Choose which columns to combine as the duplicate key (e.g., firstName+lastName)")
     print("• Rows with the same combination of values are considered duplicates")
     print("• Automatic modes: keep first, last, or best (most filled) duplicate")
     print("• Manual mode: review each duplicate set and choose which row to keep")
@@ -379,9 +345,7 @@ def main():
     num_files = len(csv_files)
 
     # Select file
-    input_file = select_single_file(
-        "Select CSV file to deduplicate", "*.csv", ".", True
-    )
+    input_file = select_single_file("Select CSV file to deduplicate", "*.csv", ".", True)
     if not input_file:
         sys.exit(1)
 
@@ -411,9 +375,7 @@ def main():
 
     print("Select columns to combine for deduplication:")
     print("Enter column numbers separated by commas (e.g., 1,3,5)")
-    print(
-        "Rows with the same combination of values in these columns will be considered duplicates."
-    )
+    print("Rows with the same combination of values in these columns will be considered duplicates.")
     print()
 
     while True:
@@ -429,20 +391,12 @@ def main():
                     column_indices = [col - 1 for col in cols]  # Convert to 0-based
                     break
                 elif len(cols) < 2:
-                    print(
-                        "❌ Please select at least 2 columns for multi-column deduplication."
-                    )
-                    print(
-                        "   (For single-column deduplication, use the 'dedup_single' script instead)"
-                    )
+                    print("❌ Please select at least 2 columns for multi-column deduplication.")
+                    print("   (For single-column deduplication, use the 'dedup_single' script instead)")
                 else:
-                    print(
-                        f"❌ Invalid column numbers. Please enter numbers between 1 and {num_cols}."
-                    )
+                    print(f"❌ Invalid column numbers. Please enter numbers between 1 and {num_cols}.")
             except ValueError:
-                print(
-                    "❌ Invalid input. Please enter column numbers separated by commas."
-                )
+                print("❌ Invalid input. Please enter column numbers separated by commas.")
         except KeyboardInterrupt:
             print("\n❌ Operation cancelled by user")
             sys.exit(1)
@@ -455,9 +409,7 @@ def main():
 
     # If no duplicates found, exit
     if duplicate_count == 0:
-        print(
-            "🎉 No deduplication needed - your file has no duplicates in the selected column combination!"
-        )
+        print("🎉 No deduplication needed - your file has no duplicates in the selected column combination!")
         sys.exit(0)
 
     # Show deduplication summary and ask for confirmation
@@ -472,9 +424,7 @@ def main():
     print()
 
     try:
-        proceed_choice = input(
-            "Do you want to proceed with deduplication? (y/N): "
-        ).strip()
+        proceed_choice = input("Do you want to proceed with deduplication? (y/N): ").strip()
     except KeyboardInterrupt:
         print("\n❌ Operation cancelled by user")
         sys.exit(1)

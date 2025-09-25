@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from src.shared.file_selector import select_single_file
+from shared.file_selector import select_single_file
 
 
 def get_row_count(input_file):
@@ -98,9 +98,7 @@ def analyze_single_duplicates(input_file, column_index):
 
     # Find duplicates
     duplicate_keys = [key for key, rows in duplicate_groups.items() if len(rows) > 1]
-    total_duplicates = sum(
-        len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1
-    )
+    total_duplicates = sum(len(rows) - 1 for rows in duplicate_groups.values() if len(rows) > 1)
 
     if len(duplicate_keys) == 0:
         print("✅ No duplicates found!")
@@ -110,9 +108,7 @@ def analyze_single_duplicates(input_file, column_index):
         print("📊 Duplicate Summary:")
         print(f"   Unique groups with duplicates: {len(duplicate_keys):,}")
         print(f"   Total duplicate rows to remove: {total_duplicates:,}")
-        print(
-            f"   Final row count after deduplication: {original_count - total_duplicates:,}"
-        )
+        print(f"   Final row count after deduplication: {original_count - total_duplicates:,}")
         print(f"   Reduction: {(total_duplicates / original_count * 100):.1f}%")
         print()
 
@@ -128,9 +124,7 @@ def analyze_single_duplicates(input_file, column_index):
 
             shown_groups += 1
             display_key = key_value if len(key_value) <= 50 else key_value[:47] + "..."
-            print(
-                f'\n   Group {shown_groups}: {len(rows)} rows with "{column_name}" = "{display_key}"'
-            )
+            print(f'\n   Group {shown_groups}: {len(rows)} rows with "{column_name}" = "{display_key}"')
             print(f"     Found on lines: {', '.join(str(row[1]) for row in rows)}")
 
             # Show filled column counts for each row
@@ -149,9 +143,7 @@ def display_row(row, headers, line_num, column_index):
     """Display a single row for manual selection"""
     print(f"     Line {line_num} ({count_filled_columns(row)} filled columns):")
     for i, (header, value) in enumerate(zip(headers, row)):
-        if (
-            value.strip() or i == column_index
-        ):  # Show non-empty values or the key column
+        if value.strip() or i == column_index:  # Show non-empty values or the key column
             display_value = value[:50] + "..." if len(value) > 50 else value
             marker = " ★" if i == column_index else ""
             print(f"       {header}: {display_value}{marker}")
@@ -183,9 +175,7 @@ def manual_deduplication(input_file, column_index, output_file):
             # Duplicates found - manual selection
             group_num += 1
             display_key = key_value if len(key_value) <= 50 else key_value[:47] + "..."
-            print(
-                f'\n🔍 Duplicate Group {group_num} ({len(rows)} rows with "{column_name}" = "{display_key}"):'
-            )
+            print(f'\n🔍 Duplicate Group {group_num} ({len(rows)} rows with "{column_name}" = "{display_key}"):')
             print("=" * 80)
             print("(★ indicates the deduplication column)")
 
@@ -194,15 +184,11 @@ def manual_deduplication(input_file, column_index, output_file):
                 display_row(row_data, headers, line_num, column_index)
 
             print(f"\n  {len(rows) + 1}) Auto-select best (most filled columns)")
-            print(
-                f"  {len(rows) + 2}) Skip this group (keep first occurrence - line {rows[0][1]})"
-            )
+            print(f"  {len(rows) + 2}) Skip this group (keep first occurrence - line {rows[0][1]})")
 
             while True:
                 try:
-                    choice = input(
-                        f"\nSelect which row to keep (1-{len(rows) + 2}): "
-                    ).strip()
+                    choice = input(f"\nSelect which row to keep (1-{len(rows) + 2}): ").strip()
                     choice_num = int(choice)
 
                     if 1 <= choice_num <= len(rows):
@@ -222,13 +208,9 @@ def manual_deduplication(input_file, column_index, output_file):
                         print(f"✓ Keeping first occurrence (line {rows[0][1]})")
                         break
                     else:
-                        print(
-                            f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 2}."
-                        )
+                        print(f"❌ Invalid choice. Please enter a number between 1 and {len(rows) + 2}.")
                 except (ValueError, KeyboardInterrupt):
-                    print(
-                        f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 2}."
-                    )
+                    print(f"❌ Invalid input. Please enter a number between 1 and {len(rows) + 2}.")
 
     # Sort by original line number to maintain order
     selected_rows.sort(key=lambda x: x[1])
@@ -265,9 +247,7 @@ def auto_deduplication(input_file, column_index, strategy, output_file):
         else:  # best
             # Find rows with maximum filled columns
             max_filled = max(count_filled_columns(row[0]) for row in rows)
-            best_rows = [
-                row for row in rows if count_filled_columns(row[0]) == max_filled
-            ]
+            best_rows = [row for row in rows if count_filled_columns(row[0]) == max_filled]
             # If tie, keep first
             return min(best_rows, key=lambda x: x[1])
 
@@ -338,9 +318,7 @@ def main():
     num_files = len(csv_files)
 
     # Select file
-    input_file = select_single_file(
-        "Select CSV file to deduplicate", "*.csv", ".", True
-    )
+    input_file = select_single_file("Select CSV file to deduplicate", "*.csv", ".", True)
     if not input_file:
         sys.exit(1)
 
@@ -393,9 +371,7 @@ def main():
 
     # If no duplicates found, exit
     if duplicate_count == 0:
-        print(
-            "🎉 No deduplication needed - your file has no duplicates in the selected column!"
-        )
+        print("🎉 No deduplication needed - your file has no duplicates in the selected column!")
         sys.exit(0)
 
     # Show deduplication summary and ask for confirmation
@@ -410,9 +386,7 @@ def main():
     print()
 
     try:
-        proceed_choice = input(
-            "Do you want to proceed with deduplication? (y/N): "
-        ).strip()
+        proceed_choice = input("Do you want to proceed with deduplication? (y/N): ").strip()
     except KeyboardInterrupt:
         print("\n❌ Operation cancelled by user")
         sys.exit(1)
