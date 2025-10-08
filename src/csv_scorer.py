@@ -46,7 +46,7 @@ STOP_WORDS = {
 
 
 class JobTitleScorer:
-    def __init__(self, config_file="config.json"):
+    def __init__(self, config_file="scorer_config.json"):
         """Initialize the scorer with configuration."""
         self.config_file = config_file
         self.keywords = {}
@@ -58,19 +58,13 @@ class JobTitleScorer:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 self.keywords = config.get("keywords", {})
-                hard_exclude_count = sum(
-                    1 for score in self.keywords.values() if score == -100
-                )
-                hard_include_count = sum(
-                    1 for score in self.keywords.values() if score == 100
-                )
+                hard_exclude_count = sum(1 for score in self.keywords.values() if score == -100)
+                hard_include_count = sum(1 for score in self.keywords.values() if score == 100)
                 print(
                     f"Loaded {len(self.keywords)} keywords ({hard_exclude_count} hard excludes, {hard_include_count} hard includes) from {self.config_file}"
                 )
         except FileNotFoundError:
-            print(
-                f"Config file '{self.config_file}' not found. Creating default config..."
-            )
+            print(f"Config file '{self.config_file}' not found. Creating default config...")
             self.create_default_config()
         except json.JSONDecodeError as e:
             print(f"Error parsing config file: {e}")
@@ -147,9 +141,7 @@ class JobTitleScorer:
             # key*word - middle wildcard
             parts = keyword_lower.split("*")
             if len(parts) == 2:
-                return (
-                    r"\b" + re.escape(parts[0]) + r".*?" + re.escape(parts[1]) + r"\b"
-                )
+                return r"\b" + re.escape(parts[0]) + r".*?" + re.escape(parts[1]) + r"\b"
             else:
                 # Multiple * in middle - treat as contains a match
                 actual_keyword = keyword_lower.replace("*", "")
@@ -189,15 +181,11 @@ class JobTitleScorer:
 
                         # Extract the matched text and count only alphanumeric characters
                         matched_text = job_title_lower[match.start() : match.end()]
-                        normalized_matched_text = re.sub(
-                            r"[^a-zA-Z0-9]", "", matched_text
-                        )
+                        normalized_matched_text = re.sub(r"[^a-zA-Z0-9]", "", matched_text)
                         matched_chars = len(normalized_matched_text)
 
                         character_percentage = (
-                            matched_chars / total_content_characters
-                            if total_content_characters > 0
-                            else 0.0
+                            matched_chars / total_content_characters if total_content_characters > 0 else 0.0
                         )
 
                         # Apply character-based normalization to hard include score
@@ -213,9 +201,7 @@ class JobTitleScorer:
         total_score = 0.0
 
         # Sort keywords by length (longest first) to handle overlapping matches
-        sorted_keywords = sorted(
-            self.keywords.items(), key=lambda x: len(x[0]), reverse=True
-        )
+        sorted_keywords = sorted(self.keywords.items(), key=lambda x: len(x[0]), reverse=True)
 
         # Track which parts of the title have been matched to avoid double-counting
         matched_positions = set()
@@ -273,9 +259,7 @@ class JobTitleScorer:
                     positive_score += score
                     positive_matched_chars += matched_chars
                 else:
-                    negative_score += (
-                        score  # Negative scores are not scaled by character percentage
-                    )
+                    negative_score += score  # Negative scores are not scaled by character percentage
 
                 break  # Only count the first occurrence of each keyword
 
@@ -293,41 +277,27 @@ class JobTitleScorer:
         # Create calculation details
         if matched_keywords:
             # Separate positive and negative keywords
-            positive_keywords = [
-                (keyword, score) for keyword, score in matched_keywords if score > 0
-            ]
-            negative_keywords = [
-                (keyword, score) for keyword, score in matched_keywords if score < 0
-            ]
-            zero_keywords = [
-                (keyword, score) for keyword, score in matched_keywords if score == 0
-            ]
+            positive_keywords = [(keyword, score) for keyword, score in matched_keywords if score > 0]
+            negative_keywords = [(keyword, score) for keyword, score in matched_keywords if score < 0]
+            zero_keywords = [(keyword, score) for keyword, score in matched_keywords if score == 0]
 
             calc_parts = []
 
             # Add positive keywords
             if positive_keywords:
-                positive_part = " + ".join(
-                    [f"{keyword} ({score})" for keyword, score in positive_keywords]
-                )
+                positive_part = " + ".join([f"{keyword} ({score})" for keyword, score in positive_keywords])
                 if positive_score > 0:
-                    positive_part += (
-                        f" × {positive_character_percentage:.2f} (pos char match)"
-                    )
+                    positive_part += f" × {positive_character_percentage:.2f} (pos char match)"
                 calc_parts.append(positive_part)
 
             # Add zero keywords (if any)
             if zero_keywords:
-                zero_part = " + ".join(
-                    [f"{keyword} ({score})" for keyword, score in zero_keywords]
-                )
+                zero_part = " + ".join([f"{keyword} ({score})" for keyword, score in zero_keywords])
                 calc_parts.append(zero_part)
 
             # Add negative keywords
             if negative_keywords:
-                negative_part = " + ".join(
-                    [f"{keyword} ({score})" for keyword, score in negative_keywords]
-                )
+                negative_part = " + ".join([f"{keyword} ({score})" for keyword, score in negative_keywords])
                 calc_parts.append(negative_part)
 
             calc_details = " + ".join(calc_parts)
@@ -336,9 +306,7 @@ class JobTitleScorer:
 
         return round(final_score, 3), calc_details, positive_character_percentage
 
-    def process_csv(
-        self, input_file, job_title_column, output_file=None, test_mode=False
-    ):
+    def process_csv(self, input_file, job_title_column, output_file=None, test_mode=False):
         """Process the CSV file and add scoring columns."""
         if not os.path.exists(input_file):
             print(f"Error: Input file '{input_file}' not found.")
@@ -347,10 +315,8 @@ class JobTitleScorer:
         # Generate output filename if not provided
         if output_file is None:
             input_path = Path(input_file)
-            suffix = "-test" if test_mode else "-scored"
-            output_file = (
-                input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
-            )
+            suffix = "-test" if test_mode else "_scored"
+            output_file = input_path.parent / f"{input_path.stem}{suffix}{input_path.suffix}"
 
         try:
             with open(input_file, "r", encoding="utf-8", newline="") as infile:
@@ -377,9 +343,7 @@ class JobTitleScorer:
                             delimiter = sniffer.sniff(sample).delimiter
                         except csv.Error:
                             # If the sniffer fails, try to detect manually
-                            if "\t" in sample and sample.count("\t") > sample.count(
-                                ","
-                            ):
+                            if "\t" in sample and sample.count("\t") > sample.count(","):
                                 delimiter = "\t"
                             else:
                                 delimiter = ","
@@ -394,7 +358,7 @@ class JobTitleScorer:
                 if fieldnames is None:
                     print("Error: No fieldnames found in CSV file.")
                     sys.exit(1)
-                
+
                 if job_title_column not in fieldnames:
                     print(f"Error: Column '{job_title_column}' not found in CSV.")
                     print(f"Available columns: {', '.join(fieldnames)}")
@@ -407,9 +371,7 @@ class JobTitleScorer:
 
                 for row in reader:
                     job_title = row.get(job_title_column, "")
-                    score, calculation, char_percentage = self.calculate_score(
-                        job_title
-                    )
+                    score, calculation, char_percentage = self.calculate_score(job_title)
 
                     rows_data.append(
                         {
@@ -466,17 +428,13 @@ class JobTitleScorer:
                     normalized_score = round(normalized_score, 3)
 
                     # Store normalized data for sorting
-                    normalized_rows.append(
-                        {"row_data": row_data, "normalized_score": normalized_score}
-                    )
+                    normalized_rows.append({"row_data": row_data, "normalized_score": normalized_score})
 
                 # Sort by normalized score in descending order
                 normalized_rows.sort(key=lambda x: x["normalized_score"], reverse=True)
 
                 with open(output_file, "w", encoding="utf-8", newline="") as outfile:
-                    writer = csv.DictWriter(
-                        outfile, fieldnames=output_fieldnames, delimiter=delimiter
-                    )
+                    writer = csv.DictWriter(outfile, fieldnames=output_fieldnames, delimiter=delimiter)
                     writer.writeheader()
 
                     for normalized_row in normalized_rows:
@@ -486,9 +444,7 @@ class JobTitleScorer:
                         if test_mode:
                             # Only include job title, score, and calculation columns
                             output_row = {
-                                job_title_column: row_data["row"].get(
-                                    job_title_column, ""
-                                ),
+                                job_title_column: row_data["row"].get(job_title_column, ""),
                                 "job_title_score": normalized_score,
                                 "score_calculation": row_data["calculation"],
                             }
@@ -523,17 +479,13 @@ def main():
     )
 
     parser.add_argument("input_file", help="Path to input CSV file")
-    parser.add_argument(
-        "job_title_column", help="Name of the column containing job titles"
-    )
-    parser.add_argument(
-        "--output", "-o", help="Output CSV file path (default: input-scored.csv)"
-    )
+    parser.add_argument("job_title_column", help="Name of the column containing job titles")
+    parser.add_argument("--output", "-o", help="Output CSV file path (default: input_scored.csv)")
     parser.add_argument(
         "--config",
         "-c",
-        default="config.json",
-        help="Configuration file path (default: config.json)",
+        default="scorer_config.json",
+        help="Configuration file path (default: scorer_config.json)",
     )
     parser.add_argument(
         "--test-mode",
@@ -547,9 +499,7 @@ def main():
     scorer = JobTitleScorer(args.config)
 
     # Process CSV
-    scorer.process_csv(
-        args.input_file, args.job_title_column, args.output, args.test_mode
-    )
+    scorer.process_csv(args.input_file, args.job_title_column, args.output, args.test_mode)
 
 
 if __name__ == "__main__":
