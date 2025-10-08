@@ -1,0 +1,4 @@
+name,email,phone,status
+  John Doe  ,john@example.com,  555-1234  ,active
+  Bob Johnson,bob@test.org,  555-9999,inactive
+David Lee,david@work.com,555-3333,active

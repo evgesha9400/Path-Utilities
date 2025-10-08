@@ -15,6 +15,10 @@ from pathlib import Path
 
 from shared.file_selector import select_multiple_files
 
+# Constants
+MATCH_SEPARATOR = "§§§"
+ENCODINGS = ["utf-8", "latin-1", "cp1252", "iso-8859-1"]
+
 
 def get_csv_files(directory="."):
     """Find all CSV files in the specified directory."""
@@ -27,19 +31,15 @@ def get_csv_files(directory="."):
 
 def get_csv_columns(filename):
     """Get column names from CSV file with encoding detection."""
-    encodings = ["utf-8", "latin-1", "cp1252", "iso-8859-1"]
-
-    for encoding in encodings:
+    for encoding in ENCODINGS:
         try:
             with open(filename, "r", encoding=encoding) as f:
                 reader = csv.reader(f)
                 headers = next(reader)
                 return headers, encoding
         except UnicodeDecodeError:
-            if encoding == encodings[-1]:
-                print(
-                    "❌ Could not decode the file with any of the attempted encodings."
-                )
+            if encoding == ENCODINGS[-1]:
+                print("❌ Could not decode the file with any of the attempted encodings.")
                 sys.exit(1)
             continue
     return None, None
@@ -91,11 +91,35 @@ def parse_column_indices(indices_str):
     return indices
 
 
+def create_match_key(row_values, col_indices):
+    """Create composite match key from row values and column indices."""
+    match_components = []
+    for col_idx in col_indices:
+        if col_idx < len(row_values):
+            match_components.append(row_values[col_idx].strip())
+        else:
+            match_components.append("")
+    return MATCH_SEPARATOR.join(match_components)
+
+
+def get_user_choice(prompt, options, input_message):
+    """Get validated user choice from a numbered menu."""
+    print(prompt)
+    for i, option in enumerate(options, 1):
+        print(f"  {i}) {option}")
+    print()
+
+    while True:
+        choice = input(input_message).strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return int(choice)
+        else:
+            print(f"❌ Invalid choice. Please enter a number between 1 and {len(options)}.")
+
+
 def read_csv_with_multi_columns(filename, match_col_indices):
     """Read CSV and create composite keys from multiple columns."""
-    encodings = ["utf-8", "latin-1", "cp1252", "iso-8859-1"]
-
-    for encoding in encodings:
+    for encoding in ENCODINGS:
         data = []
         match_values = set()
         try:
@@ -115,23 +139,14 @@ def read_csv_with_multi_columns(filename, match_col_indices):
                     data.append(row_dict)
 
                     # Composite match key
-                    match_components = []
-                    for col_idx in match_col_indices:
-                        if col_idx < len(row):
-                            match_components.append(row[col_idx].strip())
-                        else:
-                            match_components.append("")
-
-                    match_key = "§§§".join(match_components)
-                    if any(comp for comp in match_components):
+                    match_key = create_match_key(row, match_col_indices)
+                    if match_key.replace(MATCH_SEPARATOR, ""):  # Check if any components exist
                         match_values.add(match_key)
 
                 return data, headers, match_values
         except UnicodeDecodeError:
-            if encoding == encodings[-1]:
-                print(
-                    f"❌ Could not decode {filename} with any of the attempted encodings."
-                )
+            if encoding == ENCODINGS[-1]:
+                print(f"❌ Could not decode {filename} with any of the attempted encodings.")
                 sys.exit(1)
             continue
 
@@ -169,6 +184,80 @@ def validate_column_selection(selection, max_cols):
     return True
 
 
+def get_column_selection(file_path, file_num):
+    """Get column selection from user for a specific file."""
+    headers, _ = get_csv_columns(file_path)
+    num_cols = len(headers)
+
+    print(f"Select column(s) from File {file_num} to match on:")
+    print("  • For single column: enter column number (e.g.: 3)")
+    print("  • For multiple columns: enter comma-separated numbers (e.g.: 1,3,5)")
+    print("  • Column order matters: matching will preserve the order you specify")
+    print()
+
+    while True:
+        col_choice = input(f"Column selection for File {file_num} (1-{num_cols}): ").strip()
+        if validate_column_selection(col_choice, num_cols):
+            return col_choice.replace(" ", "")
+        else:
+            print(f"❌ Invalid selection. Please enter valid column numbers between 1 and {num_cols}.")
+            print("   Examples: '3' for single column, '1,3,5' for multiple columns")
+
+
+def filter_rows_by_match(export_data, export_match_indices, reference_match_values, include_matches):
+    """Filter rows based on whether they match reference values."""
+    filtered_rows = []
+
+    for row in export_data:
+        row_values = list(row.values())
+        match_key = create_match_key(row_values, export_match_indices)
+
+        # Include row if it matches criteria
+        is_match = match_key and match_key in reference_match_values
+        if is_match == include_matches:
+            filtered_rows.append(row)
+
+    return filtered_rows
+
+
+def display_match_summary(
+    file1_match_values, file2_match_values, export_data, matching_count, non_matching_count, output_type
+):
+    """Display summary of matching results."""
+    print("📊 SUMMARY:")
+    print(f"  Total rows in export file: {len(export_data)}")
+    print(f"  Unique match keys in File 1: {len(file1_match_values)}")
+    print(f"  Unique match keys in File 2: {len(file2_match_values)}")
+    print(f"  Rows with matches: {matching_count}")
+    print(f"  Rows without matches: {non_matching_count}")
+    if output_type == "matching":
+        print(f"  → Will export {matching_count} matching rows")
+    else:
+        print(f"  → Will export {non_matching_count} non-matching rows")
+    print()
+
+
+def write_output_file(filtered_rows, export_file_name, output_type):
+    """Write filtered rows to output file."""
+    if not filtered_rows:
+        if output_type == "matching":
+            print(f"No matching rows found in {export_file_name}.")
+        else:
+            print(f"All rows in {export_file_name} have matches in the other file.")
+        sys.exit(0)
+
+    # Create filename with source file basename
+    source_basename = export_file_name.replace(".csv", "").replace("./", "")
+    suffix = "matching_rows" if output_type == "matching" else "non_matching_rows"
+    output_file = f"{source_basename}_{suffix}.csv"
+
+    # Get headers from first row (stripped)
+    headers = [key for key in filtered_rows[0].keys()]
+    write_csv_from_dict_list(output_file, filtered_rows, headers)
+
+    print(f"✓ Created {output_file} with {len(filtered_rows)} {suffix.replace('_', ' ')} from {export_file_name}")
+
+
 def match_csv_files(
     file1,
     file2,
@@ -185,151 +274,49 @@ def match_csv_files(
     col2_indices = parse_column_indices(col2_indices)
 
     # Read both files
-    file1_data, file1_headers, file1_match_values = read_csv_with_multi_columns(
-        file1, col1_indices
-    )
-    file2_data, file2_headers, file2_match_values = read_csv_with_multi_columns(
-        file2, col2_indices
-    )
+    file1_data, file1_headers, file1_match_values = read_csv_with_multi_columns(file1, col1_indices)
+    file2_data, file2_headers, file2_match_values = read_csv_with_multi_columns(file2, col2_indices)
 
     # Get column names for reference
     col1_names = get_column_names(file1_headers, col1_indices)
     col2_names = get_column_names(file2_headers, col2_indices)
 
+    # Display matching information
     print("Matching on:")
-    if len(col1_indices) == 1:
-        print(f"  File 1 column: {col1_names[0]}")
-    else:
-        print(f"  File 1 columns: {' + '.join(col1_names)} (combined in order)")
-
-    if len(col2_indices) == 1:
-        print(f"  File 2 column: {col2_names[0]}")
-    else:
-        print(f"  File 2 columns: {' + '.join(col2_names)} (combined in order)")
-
+    col1_display = col1_names[0] if len(col1_indices) == 1 else f"{' + '.join(col1_names)} (combined in order)"
+    col2_display = col2_names[0] if len(col2_indices) == 1 else f"{' + '.join(col2_names)} (combined in order)"
+    print(f"  File 1 column{'s' if len(col1_indices) > 1 else ''}: {col1_display}")
+    print(f"  File 2 column{'s' if len(col2_indices) > 1 else ''}: {col2_display}")
     print(f"  Exporting from: {'File 1' if export_from == 'file1' else 'File 2'}")
-    print(
-        "  Column order: Preserved as specified (important for multi-column matching)"
-    )
+    print("  Column order: Preserved as specified (important for multi-column matching)")
     print()
 
-    # Determine which file's data and headers to use for export
-    if export_from == "file1":
-        export_data = file1_data
-        export_headers = file1_headers
-        export_match_indices = col1_indices
-        reference_match_values = file2_match_values
-        export_file_name = file1
-    else:
-        export_data = file2_data
-        export_headers = file2_headers
-        export_match_indices = col2_indices
-        reference_match_values = file1_match_values
-        export_file_name = file2
+    # Determine which file's data to export
+    export_data = file1_data if export_from == "file1" else file2_data
+    export_match_indices = col1_indices if export_from == "file1" else col2_indices
+    reference_match_values = file2_match_values if export_from == "file1" else file1_match_values
+    export_file_name = file1 if export_from == "file1" else file2
 
     # Calculate matching and non-matching counts
-    matching_count = 0
-    non_matching_count = 0
-
-    for row in export_data:
-        # Create composite match key from export file
-        row_values = list(row.values())
-        match_components = []
-        for col_idx in export_match_indices:
-            if col_idx < len(row_values):
-                match_components.append(row_values[col_idx].strip())
-            else:
-                match_components.append("")
-
-        match_key = "§§§".join(match_components)
-
-        # Check if this key exists in reference file
-        if match_key and match_key in reference_match_values:
-            matching_count += 1
-        else:
-            non_matching_count += 1
+    matching_count = sum(
+        1 for row in export_data if create_match_key(list(row.values()), export_match_indices) in reference_match_values
+    )
+    non_matching_count = len(export_data) - matching_count
 
     # Show summary if requested or in summary_only mode
     if show_summary in ["true", "summary_only"]:
-        print("📊 SUMMARY:")
-        print(f"  Total rows in export file: {len(export_data)}")
-        print(f"  Unique match keys in File 1: {len(file1_match_values)}")
-        print(f"  Unique match keys in File 2: {len(file2_match_values)}")
-        print(f"  Rows with matches: {matching_count}")
-        print(f"  Rows without matches: {non_matching_count}")
-        if output_type == "matching":
-            print(f"  → Will export {matching_count} matching rows")
-        else:
-            print(f"  → Will export {non_matching_count} non-matching rows")
-        print()
+        display_match_summary(
+            file1_match_values, file2_match_values, export_data, matching_count, non_matching_count, output_type
+        )
 
     # Exit early if this is summary_only mode
     if show_summary == "summary_only":
         return
 
-    if output_type == "matching":
-        # Find rows in export file that have matching values in reference file
-        matching_rows = []
-
-        for row in export_data:
-            # Create composite match key from export file
-            row_values = list(row.values())
-            match_components = []
-            for col_idx in export_match_indices:
-                if col_idx < len(row_values):
-                    match_components.append(row_values[col_idx].strip())
-                else:
-                    match_components.append("")
-
-            match_key = "§§§".join(match_components)
-
-            # Check if this key exists in reference file
-            if match_key and match_key in reference_match_values:
-                matching_rows.append(row)
-
-        if matching_rows:
-            # Create filename with source file basename
-            source_basename = export_file_name.replace(".csv", "").replace("./", "")
-            output_file = f"{source_basename}_matching_rows.csv"
-            write_csv_from_dict_list(output_file, matching_rows, export_headers)
-            print(
-                f"✓ Created {output_file} with {len(matching_rows)} matching rows from {export_file_name}"
-            )
-        else:
-            print(f"No matching rows found in {export_file_name}.")
-            sys.exit(0)
-
-    else:  # non_matching
-        # Find rows in export file that do NOT have matching values in reference file
-        non_matching_rows = []
-
-        for row in export_data:
-            # Create composite match key from export file
-            row_values = list(row.values())
-            match_components = []
-            for col_idx in export_match_indices:
-                if col_idx < len(row_values):
-                    match_components.append(row_values[col_idx].strip())
-                else:
-                    match_components.append("")
-
-            match_key = "§§§".join(match_components)
-
-            # Check if this key does NOT exist in reference file
-            if not match_key or match_key not in reference_match_values:
-                non_matching_rows.append(row)
-
-        if non_matching_rows:
-            # Create filename with source file basename
-            source_basename = export_file_name.replace(".csv", "").replace("./", "")
-            output_file = f"{source_basename}_non_matching_rows.csv"
-            write_csv_from_dict_list(output_file, non_matching_rows, export_headers)
-            print(
-                f"✓ Created {output_file} with {len(non_matching_rows)} non-matching rows from {export_file_name}"
-            )
-        else:
-            print(f"All rows in {export_file_name} have matches in the other file.")
-            sys.exit(0)
+    # Filter and write results
+    include_matches = output_type == "matching"
+    filtered_rows = filter_rows_by_match(export_data, export_match_indices, reference_match_values, include_matches)
+    write_output_file(filtered_rows, export_file_name, output_type)
 
 
 def main():
@@ -359,9 +346,7 @@ def main():
         sys.exit(1)
 
     # Let user select files
-    selected_files = select_multiple_files(
-        "CSV File Selection", 2, 2, "*.csv", ".", False
-    )
+    selected_files = select_multiple_files("CSV File Selection", 2, 2, "*.csv", ".", False)
     if not selected_files:
         sys.exit(1)
 
@@ -392,90 +377,31 @@ def main():
     display_columns(file2)
     print()
 
-    # Get column count for file 1
-    headers1, _ = get_csv_columns(file1)
-    num_cols1 = len(headers1)
-
-    print("Select column(s) from File 1 to match on:")
-    print("  • For single column: enter column number (e.g.: 3)")
-    print("  • For multiple columns: enter comma-separated numbers (e.g.: 1,3,5)")
-    print("  • Column order matters: matching will preserve the order you specify")
+    # Get column selections
+    col1_choice = get_column_selection(file1, 1)
     print()
-
-    while True:
-        col1_choice = input(f"Column selection for File 1 (1-{num_cols1}): ").strip()
-        if validate_column_selection(col1_choice, num_cols1):
-            # Remove spaces and store
-            col1_choice = col1_choice.replace(" ", "")
-            break
-        else:
-            print(
-                f"❌ Invalid selection. Please enter valid column numbers between 1 and {num_cols1}."
-            )
-            print("   Examples: '3' for single column, '1,3,5' for multiple columns")
-
-    # Get column count for file 2
-    headers2, _ = get_csv_columns(file2)
-    num_cols2 = len(headers2)
-
-    print()
-    print("Select column(s) from File 2 to match on:")
-    print("  • For single column: enter column number (e.g.: 2)")
-    print("  • For multiple columns: enter comma-separated numbers (e.g.: 2,4,6)")
-    print("  • Column order matters: matching will preserve the order you specify")
-    print()
-
-    while True:
-        col2_choice = input(f"Column selection for File 2 (1-{num_cols2}): ").strip()
-        if validate_column_selection(col2_choice, num_cols2):
-            # Remove spaces and store
-            col2_choice = col2_choice.replace(" ", "")
-            break
-        else:
-            print(
-                f"❌ Invalid selection. Please enter valid column numbers between 1 and {num_cols2}."
-            )
-            print("   Examples: '2' for single column, '2,4,6' for multiple columns")
-
+    col2_choice = get_column_selection(file2, 2)
     print()
 
     # Prompt for which file to export from
-    print("Choose which file to export rows from:")
-    print(f"  1) Export from File 1: {Path(file1).name}")
-    print(f"  2) Export from File 2: {Path(file2).name}")
-    print()
-
-    while True:
-        choice = input("Enter your choice (1-2): ").strip()
-        if choice == "1":
-            export_from = "file1"
-            break
-        elif choice == "2":
-            export_from = "file2"
-            break
-        else:
-            print("❌ Invalid choice. Please enter 1 or 2.")
-
+    export_choice = get_user_choice(
+        "Choose which file to export rows from:",
+        [f"Export from File 1: {Path(file1).name}", f"Export from File 2: {Path(file2).name}"],
+        "Enter your choice (1-2): ",
+    )
+    export_from = "file1" if export_choice == 1 else "file2"
     print()
 
     # Prompt for output type
-    print("Choose output type:")
-    print("  1) Export matching rows (rows that have matches in the other file)")
-    print(
-        "  2) Export non-matching rows (rows that do NOT have matches in the other file)"
+    output_choice = get_user_choice(
+        "Choose output type:",
+        [
+            "Export matching rows (rows that have matches in the other file)",
+            "Export non-matching rows (rows that do NOT have matches in the other file)",
+        ],
+        "Enter your choice (1-2): ",
     )
-    print()
-
-    while True:
-        choice = input("Enter your choice (1-2): ").strip()
-        if choice == "1":
-            output_type = "matching"
-            break
-        elif choice == "2":
-            output_type = "non_matching"
-            break
-        else:
-            print("❌ Invalid choice. Please enter 1 or 2.")
+    output_type = "matching" if output_choice == 1 else "non_matching"
 
     print()
 
@@ -483,9 +409,7 @@ def main():
     base_name = longest_common_substring(file1, file2)
 
     print("📝 Processing files...")
-    print(
-        f"   Export from: {Path(file1).name if export_from == 'file1' else Path(file2).name}"
-    )
+    print(f"   Export from: {Path(file1).name if export_from == 'file1' else Path(file2).name}")
     print(f"   Output type: {output_type}")
     print()
 
@@ -503,30 +427,28 @@ def main():
     )
 
     print()
-    while True:
-        proceed_choice = (
-            input("Do you want to proceed with the export? (y/n): ").strip().lower()
-        )
-        if proceed_choice in ["y", "yes"]:
-            print()
-            print("📝 Exporting matching results...")
-            match_csv_files(
-                file1,
-                file2,
-                col1_choice,
-                col2_choice,
-                output_type,
-                export_from,
-                base_name,
-                "export_only",
-            )
-            print("🎉 Matching completed successfully!")
-            break
-        elif proceed_choice in ["n", "no"]:
-            print("Export cancelled.")
-            sys.exit(0)
-        else:
-            print("❌ Invalid choice. Please enter 'y' for yes or 'n' for no.")
+    proceed_choice = input("Do you want to proceed with the export? (y/n): ").strip().lower()
+    while proceed_choice not in ["y", "yes", "n", "no"]:
+        print("❌ Invalid choice. Please enter 'y' for yes or 'n' for no.")
+        proceed_choice = input("Do you want to proceed with the export? (y/n): ").strip().lower()
+
+    if proceed_choice in ["n", "no"]:
+        print("Export cancelled.")
+        sys.exit(0)
+
+    print()
+    print("📝 Exporting matching results...")
+    match_csv_files(
+        file1,
+        file2,
+        col1_choice,
+        col2_choice,
+        output_type,
+        export_from,
+        base_name,
+        "export_only",
+    )
+    print("🎉 Matching completed successfully!")
 
 
 if __name__ == "__main__":
