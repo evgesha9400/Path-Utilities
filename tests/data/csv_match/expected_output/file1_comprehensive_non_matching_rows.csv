@@ -1,0 +1,5 @@
+id,name (full),email@primary,address,notes,status&type
+2,  Jane Smith  ,jane@example.com,456 Oak Ave,Leading/trailing spaces  ,active
+5,Charlie Wilson,charlie@email.net,,Empty address,pending
+sp002,"Mike ""Boss"" Wilson",mike@work.org,Special St,Quotes & symbols: @#$%^&*(),active&admin
+11,Alice Brown,alice@test.com,654 Birch Ln,Another user,active

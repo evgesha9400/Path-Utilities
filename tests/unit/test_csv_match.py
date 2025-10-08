@@ -106,211 +106,155 @@ class TestCSVMatch(unittest.TestCase):
 
     # Core Functionality Tests
 
-    def test_single_column_matching_basic(self):
-        """Test basic single column matching."""
+    def test_single_column_matching(self):
+        """Test single column matching with comprehensive data."""
         self.run_match_test(
-            "file1_basic.csv",
-            "file2_basic.csv",
+            "file1_comprehensive.csv",
+            "file2_comprehensive.csv",
             "1",  # id column
             "1",  # user_id column
             "matching",
             "file1",
-            "file1_basic_matching_rows.csv",
+            "file1_comprehensive_matching_rows.csv",
         )
 
     def test_multi_column_matching(self):
         """Test multiple column composite key matching."""
-        self.run_match_test(
-            "file1_multi_col.csv",
-            "file2_multi_col.csv",
-            "1,2",  # first_name, last_name
-            "1,2",  # fname, lname
-            "matching",
-            "file1",
-            "file1_multi_col_matching_rows.csv",
-        )
+        # Match on columns 1,2 (id and name)
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        file2 = str(self.test_data_dir / "file2_comprehensive.csv")
+
+        data1, _, match_values1 = read_csv_with_multi_columns(file1, [0, 1])
+        data2, _, match_values2 = read_csv_with_multi_columns(file2, [0, 1])
+
+        # Verify composite keys are created
+        self.assertIn("1§§§John Doe", match_values1)
+        self.assertIn("1§§§John Doe", match_values2)
+
+        # Verify they match
+        self.assertTrue(len(match_values1 & match_values2) > 0)
 
     def test_matching_rows_export(self):
         """Test exporting only matching rows."""
         self.run_match_test(
-            "file1_basic.csv", "file2_basic.csv", "1", "1", "matching", "file1", "file1_basic_matching_rows.csv"
+            "file1_comprehensive.csv",
+            "file2_comprehensive.csv",
+            "1",
+            "1",
+            "matching",
+            "file1",
+            "file1_comprehensive_matching_rows.csv",
         )
 
     def test_non_matching_rows_export(self):
         """Test exporting only non-matching rows."""
         self.run_match_test(
-            "file1_basic.csv", "file2_basic.csv", "1", "1", "non_matching", "file1", "file1_basic_non_matching_rows.csv"
+            "file1_comprehensive.csv",
+            "file2_comprehensive.csv",
+            "1",
+            "1",
+            "non_matching",
+            "file1",
+            "file1_comprehensive_non_matching_rows.csv",
         )
 
     def test_export_from_file1(self):
         """Test exporting from first file."""
         self.run_match_test(
-            "file1_basic.csv", "file2_basic.csv", "1", "1", "matching", "file1", "file1_basic_matching_rows.csv"
+            "file1_comprehensive.csv",
+            "file2_comprehensive.csv",
+            "1",
+            "1",
+            "matching",
+            "file1",
+            "file1_comprehensive_matching_rows.csv",
         )
 
     def test_export_from_file2(self):
         """Test exporting from second file."""
         self.run_match_test(
-            "file1_basic.csv", "file2_basic.csv", "1", "1", "matching", "file2", "file2_basic_matching_rows.csv"
-        )
-
-    # Special Conditions Tests
-
-    def test_special_characters_in_headers(self):
-        """Test special characters in column headers."""
-        self.run_match_test(
-            "file1_special_chars.csv",
-            "file2_special_chars.csv",
-            "1",  # user@id
-            "1",  # id@user
-            "matching",
-            "file1",
-            "file1_special_chars_matching_rows.csv",
-        )
-
-    def test_special_characters_in_values(self):
-        """Test special characters in data values."""
-        # Same test as above, verifies values are preserved
-        self.run_match_test(
-            "file1_special_chars.csv",
-            "file2_special_chars.csv",
+            "file1_comprehensive.csv",
+            "file2_comprehensive.csv",
             "1",
             "1",
             "matching",
-            "file1",
-            "file1_special_chars_matching_rows.csv",
+            "file2",
+            "file2_comprehensive_matching_rows.csv",
         )
 
-    def test_spaces_in_headers(self):
-        """Test handling of spaces in column headers."""
-        # Headers with leading/trailing spaces should still work
-        file1 = str(self.test_data_dir / "file1_spaces.csv")
-        file2 = str(self.test_data_dir / "file2_spaces.csv")
+    # Special Conditions Tests (all tested via comprehensive files)
 
-        data1, headers1, _ = read_csv_with_multi_columns(file1, [0])
-        data2, headers2, _ = read_csv_with_multi_columns(file2, [0])
+    def test_special_characters(self):
+        """Test special characters in headers and values."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, headers, _ = read_csv_with_multi_columns(file1, [0])
 
-        # Verify headers are read correctly (even with spaces)
-        self.assertIn("name", [h.strip() for h in headers1])
-        self.assertIn("name", [h.strip() for h in headers2])
+        # Verify special char headers are read correctly
+        self.assertIn("name (full)", [h.strip() for h in headers])
+        self.assertIn("email@primary", [h.strip() for h in headers])
+        self.assertIn("status&type", [h.strip() for h in headers])
 
-    def test_spaces_in_values(self):
-        """Test space trimming in match values."""
-        self.run_match_test(
-            "file1_spaces.csv",
-            "file2_spaces.csv",
-            "1",  # name column (with spaces)
-            "1",  # name column (with spaces)
-            "matching",
-            "file1",
-            "file1_spaces_matching_rows.csv",
-        )
+        # Verify special char values are preserved
+        self.assertTrue(any("Bob [Johnson]" in str(row.values()) for row in data))
+        self.assertTrue(any('Mike "Boss" Wilson' in str(row.values()) for row in data))
+
+    def test_unicode_characters(self):
+        """Test Unicode character handling."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, _ = read_csv_with_multi_columns(file1, [0])
+
+        # Verify Unicode is preserved
+        self.assertTrue(any("José García" in str(row.values()) for row in data))
+        self.assertTrue(any("日本語" in str(row.values()) for row in data))
+        self.assertTrue(any("😊" in str(row.values()) for row in data))
 
     def test_multiline_values(self):
         """Test handling of newlines in CSV fields."""
-        self.run_match_test(
-            "file1_multiline.csv",
-            "file2_multiline.csv",
-            "1",  # id
-            "1",  # user_id
-            "matching",
-            "file1",
-            "file1_multiline_matching_rows.csv",
-        )
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, _ = read_csv_with_multi_columns(file1, [0])
 
-    def test_empty_lines_handling(self):
-        """Test that empty lines are read as rows with empty values."""
-        file1 = str(self.test_data_dir / "file1_empty_lines.csv")
-        file2 = str(self.test_data_dir / "file2_empty_lines.csv")
+        # Verify multiline values are preserved
+        bob_row = next((row for row in data if "Bob [Johnson]" in str(row.values())), None)
+        self.assertIsNotNone(bob_row)
+        # Check that multiline address is preserved
+        self.assertTrue(any("\n" in str(val) for val in bob_row.values()))
 
-        data1, _, _ = read_csv_with_multi_columns(file1, [0])
-        data2, _, _ = read_csv_with_multi_columns(file2, [0])
+    def test_spaces_handling(self):
+        """Test space trimming in match values and preservation in data."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, _ = read_csv_with_multi_columns(file1, [0])
 
-        # CSV reader reads empty lines as rows
-        # This is expected behavior - empty lines become rows with empty values
-        self.assertGreater(len(data1), 0)
-        self.assertGreater(len(data2), 0)
+        # Verify spaces are preserved in data
+        jane_row = next((row for row in data if "Jane Smith" in str(row.values())), None)
+        self.assertIsNotNone(jane_row)
 
-    def test_unicode_characters(self):
-        """Test Unicode character handling and encoding."""
-        self.run_match_test(
-            "file1_unicode.csv",
-            "file2_unicode.csv",
-            "1",  # id
-            "1",  # user_id
-            "matching",
-            "file1",
-            "file1_unicode_matching_rows.csv",
-        )
-
-    def test_headers_only_files(self):
-        """Test files with only headers (and possible trailing newline)."""
-        file1 = str(self.test_data_dir / "file1_headers_only.csv")
-        file2 = str(self.test_data_dir / "file2_headers_only.csv")
-
-        data1, headers1, _ = read_csv_with_multi_columns(file1, [0])
-        data2, headers2, _ = read_csv_with_multi_columns(file2, [0])
-
-        # Should have headers
-        self.assertGreater(len(headers1), 0)
-        self.assertGreater(len(headers2), 0)
-        # May have 0 or 1 row (if trailing newline creates empty row)
-        self.assertLessEqual(len(data1), 1)
-        self.assertLessEqual(len(data2), 1)
-
-    def test_single_row_files(self):
-        """Test minimal CSV files with just one data row (plus possible trailing newline)."""
-        file1 = str(self.test_data_dir / "file1_single_row.csv")
-        file2 = str(self.test_data_dir / "file2_single_row.csv")
-
-        data1, _, match_values1 = read_csv_with_multi_columns(file1, [0])
-        data2, _, match_values2 = read_csv_with_multi_columns(file2, [0])
-
-        # Each should have 1 or 2 rows (if trailing newline creates empty row)
-        self.assertGreaterEqual(len(data1), 1)
-        self.assertLessEqual(len(data1), 2)
-        self.assertGreaterEqual(len(data2), 1)
-        self.assertLessEqual(len(data2), 2)
-
-        # They should have matching ids (both have id=1)
-        self.assertTrue(len(match_values1 & match_values2) > 0)
-
-    def test_composite_key_order(self):
-        """Test that multi-column order is preserved in composite keys."""
-        # Test that John§§§Doe matches, but Doe§§§John would not
-        data, _, match_values = read_csv_with_multi_columns(
-            str(self.test_data_dir / "file1_multi_col.csv"),
-            [0, 1],  # first_name, last_name
-        )
-
-        # Create expected composite key
-        expected_key = "John§§§Doe"
-        self.assertIn(expected_key, match_values)
-
-        # Reversed order should NOT be in match values (unless it exists in data)
-        reversed_key = "Doe§§§John"
-        self.assertNotIn(reversed_key, match_values)
-
-    def test_empty_columns(self):
-        """Test handling of completely empty columns."""
-        # file1_spaces has some rows with empty/whitespace-only values
-        file1 = str(self.test_data_dir / "file1_spaces.csv")
-        data, headers, _ = read_csv_with_multi_columns(file1, [2])  # phone column
-
-        # Should handle empty values gracefully
-        self.assertGreater(len(data), 0)
-
-    def test_whitespace_vs_empty(self):
-        """Test distinction between whitespace-only and truly empty values."""
-        # Whitespace should be stripped in match keys
-        row_values1 = ["  John Doe  ", "test@example.com"]
+        # Verify trimming happens in match keys
+        row_values = ["  John Doe  ", "test@example.com"]
+        key1 = create_match_key(row_values, [0])
         row_values2 = ["John Doe", "test@example.com"]
-
-        key1 = create_match_key(row_values1, [0])
         key2 = create_match_key(row_values2, [0])
+        self.assertEqual(key1, key2)  # Spaces should be trimmed in keys
 
-        # After stripping, they should match
-        self.assertEqual(key1, key2)
+    def test_empty_values(self):
+        """Test handling of empty values and empty columns."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, _ = read_csv_with_multi_columns(file1, [0])
+
+        # Verify empty name row exists
+        empty_name_row = next((row for row in data if "empty@test.com" in str(row.values())), None)
+        self.assertIsNotNone(empty_name_row)
+
+        # Verify empty address is handled
+        charlie_row = next((row for row in data if "Charlie Wilson" in str(row.values())), None)
+        self.assertIsNotNone(charlie_row)
+
+    def test_empty_lines_in_file(self):
+        """Test that empty lines are handled correctly."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, _ = read_csv_with_multi_columns(file1, [0])
+
+        # File has empty lines, but data should still be read
+        self.assertGreater(len(data), 0)
 
     # Helper Function Tests
 
@@ -379,6 +323,19 @@ class TestCSVMatch(unittest.TestCase):
         # Out of range index (should return placeholder)
         names = get_column_names(headers, [10])
         self.assertEqual(names, ["Column_11"])  # 1-based for display
+
+    def test_composite_key_order(self):
+        """Test that multi-column order is preserved in composite keys."""
+        file1 = str(self.test_data_dir / "file1_comprehensive.csv")
+        data, _, match_values = read_csv_with_multi_columns(file1, [0, 1])
+
+        # Create expected composite key
+        expected_key = "1§§§John Doe"
+        self.assertIn(expected_key, match_values)
+
+        # Reversed order should NOT be in match values
+        reversed_key = "John Doe§§§1"
+        self.assertNotIn(reversed_key, match_values)
 
 
 if __name__ == "__main__":

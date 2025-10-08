@@ -1,0 +1,18 @@
+id,name (full),email@primary,address,notes,status&type
+1,John Doe,john@example.com,"123 Main St, City","Regular user",active
+2,  Jane Smith  ,jane@example.com,"456 Oak Ave","Leading/trailing spaces  ",active
+3,Bob [Johnson],bob@company.org,"789 Pine Rd
+Suite 200
+Chicago, IL 60601","Multiline
+address
+here",inactive&guest
+
+
+5,Charlie Wilson,charlie@email.net,,"Empty address",pending
+sp001,José García,jose@example.com,"España Address","Unicode: 日本語 😊",active&user
+sp002,"Mike ""Boss"" Wilson",mike@work.org,"Special St","Quotes & symbols: @#$%^&*()",active&admin
+7,Emma Davis,emma@sample.org,321 Elm St,"Normal entry",inactive
+,empty@test.com,"No Name St","Empty name column",active
+10,Henry Anderson,henry@site.net,"   ","Whitespace address",active
+11,Alice Brown,alice@test.com,654 Birch Ln,"Another user",active
+

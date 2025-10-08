@@ -1,5 +1,0 @@
-user@id,name (full),email#primary,status&type
-sp001,John @Doe,john#test@example.com,active&user
-sp003,Bob [Johnson],bob^data@company.net,inactive&guest
-sp005,"Mike ""The Boss"" Wilson",mike&boss@work.org,active&admin
-sp007,Tom <Tester>,tom(test)@qa.com,active&tester

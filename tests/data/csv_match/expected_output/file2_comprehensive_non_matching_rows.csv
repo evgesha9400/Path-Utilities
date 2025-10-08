@@ -1,0 +1,3 @@
+user_id,full_name (primary),contact#email,location,comments,type&status
+12,New User,new@user.com,New Location,Non-matching ID,yes
+sp999,Special User,special@test.org,Special Place,Another non-match,admin
