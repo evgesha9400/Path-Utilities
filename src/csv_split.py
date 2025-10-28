@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# src/csv_split.py
 
 import argparse
 import csv
@@ -78,8 +79,15 @@ def show_menu():
     print()
 
 
-def split_by_count(input_file, num_files, base_name):
-    """Split CSV into N files with even distribution."""
+def split_by_count(input_file, num_files, base_name, distribution="contiguous"):
+    """Split CSV into N files with even distribution.
+
+    :param input_file: Path to input CSV file
+    :param num_files: Number of output files to create
+    :param base_name: Base name for output files
+    :param distribution: Distribution method - "contiguous" or "interleaved"
+    :return: True if successful, False otherwise
+    """
     total_rows = count_data_rows(input_file)
     header = get_header(input_file)
 
@@ -91,9 +99,11 @@ def split_by_count(input_file, num_files, base_name):
     base_rows = total_rows // num_files
     extra_rows = total_rows % num_files
 
+    distribution_label = "interleaved (round-robin)" if distribution == "interleaved" else "contiguous"
     print("📊 Split calculation:")
     print(f"   Total data rows: {total_rows}")
     print(f"   Number of files: {num_files}")
+    print(f"   Distribution method: {distribution_label}")
     print(f"   Base rows per file: {base_rows}")
     print(f"   Extra rows to distribute: {extra_rows}")
     print()
@@ -122,34 +132,62 @@ def split_by_count(input_file, num_files, base_name):
     header = rows[0]
     data_rows = rows[1:]
 
-    current_row = 0
-    for i in range(1, num_files + 1):
-        output_file = f"{base_name} - Part {i}.csv"
+    if distribution == "interleaved":
+        # Round-robin distribution
+        # Create list of lists for each file
+        file_rows = [[] for _ in range(num_files)]
 
-        # Calculate rows for this file
-        rows_in_file = base_rows
-        if i <= extra_rows:
-            rows_in_file = base_rows + 1
+        # Distribute rows in round-robin fashion
+        for idx, row in enumerate(data_rows):
+            file_idx = idx % num_files
+            file_rows[file_idx].append(row)
 
-        # Write file
-        with open(output_file, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
+        # Write files
+        for i in range(num_files):
+            output_file = f"{base_name} - Part {i + 1}.csv"
+            with open(output_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(file_rows[i])
 
-            if rows_in_file > 0:
-                end_row = current_row + rows_in_file
-                writer.writerows(data_rows[current_row:end_row])
-                current_row = end_row
+            print(f"   ✓ Created {output_file} with {len(file_rows[i])} data rows")
+    else:
+        # Contiguous distribution (original behavior)
+        current_row = 0
+        for i in range(1, num_files + 1):
+            output_file = f"{base_name} - Part {i}.csv"
 
-        print(f"   ✓ Created {output_file} with {rows_in_file} data rows")
+            # Calculate rows for this file
+            rows_in_file = base_rows
+            if i <= extra_rows:
+                rows_in_file = base_rows + 1
+
+            # Write file
+            with open(output_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+
+                if rows_in_file > 0:
+                    end_row = current_row + rows_in_file
+                    writer.writerows(data_rows[current_row:end_row])
+                    current_row = end_row
+
+            print(f"   ✓ Created {output_file} with {rows_in_file} data rows")
 
     print()
     print(f"🎉 Successfully split {input_file} into {num_files} files!")
     return True
 
 
-def split_by_max_rows(input_file, max_rows, base_name):
-    """Split CSV by maximum rows per file."""
+def split_by_max_rows(input_file, max_rows, base_name, distribution="contiguous"):
+    """Split CSV by maximum rows per file.
+
+    :param input_file: Path to input CSV file
+    :param max_rows: Maximum rows per output file
+    :param base_name: Base name for output files
+    :param distribution: Distribution method - "contiguous" or "interleaved"
+    :return: True if successful, False otherwise
+    """
     total_rows = count_data_rows(input_file)
     header = get_header(input_file)
 
@@ -160,27 +198,13 @@ def split_by_max_rows(input_file, max_rows, base_name):
     # Calculate number of files needed
     num_files = (total_rows + max_rows - 1) // max_rows  # Ceiling division
 
+    distribution_label = "interleaved (round-robin)" if distribution == "interleaved" else "contiguous"
     print("📊 Split calculation:")
     print(f"   Total data rows: {total_rows}")
     print(f"   Maximum rows per file: {max_rows}")
     print(f"   Number of files needed: {num_files}")
+    print(f"   Distribution method: {distribution_label}")
     print()
-
-    # Show distribution
-    print("📁 Output files and row mapping:")
-    for i in range(1, num_files + 1):
-        start_row = (i - 1) * max_rows + 1
-        end_row = min(i * max_rows, total_rows)
-        rows_in_file = end_row - start_row + 1
-        print(f"   {base_name} - Part {i}.csv: {rows_in_file} rows")
-    print()
-
-    proceed = input("Proceed with split? (y/N): ").strip().lower()
-    if proceed != "y":
-        print("❌ Operation cancelled.")
-        return False
-
-    print("✂️  Splitting file...")
 
     # Read all data
     with open(input_file, "r") as f:
@@ -190,21 +214,66 @@ def split_by_max_rows(input_file, max_rows, base_name):
     header = rows[0]
     data_rows = rows[1:]
 
-    for i in range(1, num_files + 1):
-        output_file = f"{base_name} - Part {i}.csv"
-        start_row = (i - 1) * max_rows
-        end_row = min(i * max_rows, total_rows)
-        rows_in_file = end_row - start_row
+    if distribution == "interleaved":
+        # Round-robin distribution
+        file_rows = [[] for _ in range(num_files)]
 
-        # Write file
-        with open(output_file, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
+        # Distribute rows in round-robin fashion
+        for idx, row in enumerate(data_rows):
+            file_idx = idx % num_files
+            # Only add if we haven't exceeded max_rows for this file
+            if len(file_rows[file_idx]) < max_rows:
+                file_rows[file_idx].append(row)
 
-            if rows_in_file > 0:
-                writer.writerows(data_rows[start_row:end_row])
+        # Show distribution
+        print("📁 Output files and row mapping:")
+        for i in range(num_files):
+            print(f"   {base_name} - Part {i + 1}.csv: {len(file_rows[i])} rows")
+        print()
+    else:
+        # Contiguous distribution
+        print("📁 Output files and row mapping:")
+        for i in range(1, num_files + 1):
+            start_row = (i - 1) * max_rows + 1
+            end_row = min(i * max_rows, total_rows)
+            rows_in_file = end_row - start_row + 1
+            print(f"   {base_name} - Part {i}.csv: {rows_in_file} rows")
+        print()
 
-        print(f"   ✓ Created {output_file} with {rows_in_file} data rows")
+    proceed = input("Proceed with split? (y/N): ").strip().lower()
+    if proceed != "y":
+        print("❌ Operation cancelled.")
+        return False
+
+    print("✂️  Splitting file...")
+
+    if distribution == "interleaved":
+        # Write files with round-robin distribution
+        for i in range(num_files):
+            output_file = f"{base_name} - Part {i + 1}.csv"
+            with open(output_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(file_rows[i])
+
+            print(f"   ✓ Created {output_file} with {len(file_rows[i])} data rows")
+    else:
+        # Write files with contiguous distribution
+        for i in range(1, num_files + 1):
+            output_file = f"{base_name} - Part {i}.csv"
+            start_row = (i - 1) * max_rows
+            end_row = min(i * max_rows, total_rows)
+            rows_in_file = end_row - start_row
+
+            # Write file
+            with open(output_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+
+                if rows_in_file > 0:
+                    writer.writerows(data_rows[start_row:end_row])
+
+            print(f"   ✓ Created {output_file} with {rows_in_file} data rows")
 
     print()
     print(f"🎉 Successfully split {input_file} into {num_files} files!")
@@ -215,6 +284,13 @@ def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="CSV Split Utility")
     parser.add_argument("input_file", nargs="?", help="Input CSV file (optional)")
+    parser.add_argument(
+        "--distribution",
+        metavar="",
+        choices=["contiguous", "interleaved"],
+        default=None,
+        help="Distribution method: contiguous (sequential blocks) or interleaved (round-robin)",
+    )
     args = parser.parse_args()
 
     print("✂️  CSV Split Utility")
@@ -264,13 +340,29 @@ def main():
                 sys.exit(1)
 
             if num_files > total_rows:
-                print(
-                    f"❌ Cannot create more files ({num_files}) than data rows ({total_rows})."
-                )
+                print(f"❌ Cannot create more files ({num_files}) than data rows ({total_rows}).")
                 sys.exit(1)
 
+            # Ask for distribution method if not provided via CLI
+            if args.distribution:
+                distribution = args.distribution
+            else:
+                print()
+                print("Select distribution method:")
+                print("1) Contiguous - Sequential blocks of rows (1-50, 51-100, ...)")
+                print("2) Interleaved - Round-robin distribution (1,3,5... / 2,4,6...)")
+                print()
+                dist_choice = input("Choose distribution method (1 or 2): ").strip()
+                if dist_choice == "1":
+                    distribution = "contiguous"
+                elif dist_choice == "2":
+                    distribution = "interleaved"
+                else:
+                    print("❌ Invalid choice.")
+                    sys.exit(1)
+
             print()
-            split_by_count(input_file, num_files, base_name)
+            split_by_count(input_file, num_files, base_name, distribution)
         except ValueError:
             print("❌ Invalid number of files. Must be a positive integer.")
             sys.exit(1)
@@ -283,8 +375,26 @@ def main():
                 print("❌ Invalid number of rows. Must be a positive integer.")
                 sys.exit(1)
 
+            # Ask for distribution method if not provided via CLI
+            if args.distribution:
+                distribution = args.distribution
+            else:
+                print()
+                print("Select distribution method:")
+                print("1) Contiguous - Sequential blocks of rows (1-50, 51-100, ...)")
+                print("2) Interleaved - Round-robin distribution (1,3,5... / 2,4,6...)")
+                print()
+                dist_choice = input("Choose distribution method (1 or 2): ").strip()
+                if dist_choice == "1":
+                    distribution = "contiguous"
+                elif dist_choice == "2":
+                    distribution = "interleaved"
+                else:
+                    print("❌ Invalid choice.")
+                    sys.exit(1)
+
             print()
-            split_by_max_rows(input_file, max_rows, base_name)
+            split_by_max_rows(input_file, max_rows, base_name, distribution)
         except ValueError:
             print("❌ Invalid number of rows. Must be a positive integer.")
             sys.exit(1)
